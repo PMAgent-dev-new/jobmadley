@@ -97,19 +97,25 @@ function sanitize(text: string): { clean: string; flags: string[] } {
   for (const rr of RULES) {
     if (rr.action === 'replace') out = out.replace(rr.re, (m) => { flags.push('[REPL] ' + m); return '' })
   }
-  return { clean: out.replace(/\s+/g, ' ').trim(), flags }
+  // 空白は畳むが改行は保持する（説明文の段落構造を残すため）
+  const clean = out
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  return { clean, flags }
 }
 
 function htmlToText(html: string): string {
   return String(html || '')
     .replace(/<\s*(br|\/p|\/h[1-6]|\/li)\s*\/?>/gi, '\n')
-    .replace(/<li[^>]*>/gi, '・')
+    .replace(/<li[^>]*>/gi, '\n・')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
     .replace(/&#x?[0-9a-f]+;/gi, '')
     .replace(/[\u{1F000}-\u{1FAFF}\u{1F1E6}-\u{1F1FF}\u{2300}-\u{27BF}\u{2B00}-\u{2BFF}\u{2190}-\u{21FF}\u{FE00}-\u{FE0F}\u{200D}\u{2122}\u{2139}\u{E000}-\u{F8FF}]/gu, '')
     .replace(/[■□◆◇★☆▼▲▽△●◎※→⇒⇨➡←↑↓✓✔✕✖❌⭕]+/g, '')
-    .replace(/[・･‣◦]+/g, ' ')
+    .replace(/[・･‣◦]{2,}/g, '・') // 連打（装飾）のみ単一化。単独の・は箇条書き/並記として保持
     .replace(/[!！]{2,}/g, '！').replace(/[?？]{2,}/g, '？')
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u200B-\u200F\uFEFF]/g, '')
     .replace(/[＆&]/g, 'と').replace(/[<>＜＞]/g, '')
@@ -175,11 +181,27 @@ function parseAddressPrefMuni(s?: string): { region?: string; locality?: string 
   return { region: m[1], locality: m[2] }
 }
 
-// ===== 説明HTML（metadata.ts buildJobDescriptionHtml 相当） =====
-const escapeHtml = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-function buildDescriptionHtml(job: Job): string {
+// ===== 説明テキスト（読みやすさ整形） =====
+// 1行目=要点サマリー（給与｜雇用形態｜勤務地）→ 空行 → 仕事内容本文（見出しラベル無し）
+// → 以降のセクションは【見出し】+改行。記号はMeta規定に沿い【】・｜のみ（装飾記号はhtmlToTextで除去済）。
+function salaryLabel(job: Job): string {
+  const unitRaw = job.wageType?.[0]?.trim() || ''
+  const unit = WAGE_UNIT_MAP[unitRaw] ? unitRaw : '月給'
+  const fmt = (v: number) =>
+    v >= 100000 ? `${Math.round(v / 1000) / 10}万円` : `${v.toLocaleString('ja-JP')}円`
+  const min = Number(job.salaryMin) || 0
+  const max = Number(job.salaryMax) || 0
+  if (!min && !max) return ''
+  if (min && max && min !== max) return `${unit}${fmt(min)}〜${fmt(max)}`
+  return `${unit}${fmt(min || max)}`
+}
+
+function buildDescriptionText(job: Job, region: string, locality: string): string {
+  const summary = [salaryLabel(job), job.employmentType?.[0] ?? '', `${region}${locality}`.trim()]
+    .filter(Boolean)
+    .join('｜')
   const sections: Array<[string, string | undefined]> = [
-    ['仕事内容', job.descriptionWork],
+    ['', job.descriptionWork], // 先頭は見出し無し（「仕事内容」ラベルは冗長のため出さない）
     ['アピールポイント', job.descriptionAppeal],
     ['求める人物像', job.descriptionPerson],
     ['給与', job.salaryNote],
@@ -189,11 +211,19 @@ function buildDescriptionHtml(job: Job): string {
     ['アクセス', job.access],
     ['その他', job.descriptionOther],
   ]
-  const html = sections
-    .filter(([, body]) => body && body.trim())
-    .map(([h, body]) => `<h3>${escapeHtml(h)}</h3><p>${escapeHtml(body!.trim()).replace(/\n/g, '<br>')}</p>`)
-    .join('')
-  return html || escapeHtml(job.descriptionWork ?? job.descriptionAppeal ?? job.title ?? '')
+  const parts: string[] = []
+  if (summary) parts.push(summary)
+  for (const [label, body] of sections) {
+    if (!body || !body.trim()) continue
+    const text = htmlToText(body)
+    if (!text) continue
+    parts.push(label ? `【${label}】\n${text}` : text)
+  }
+  if (parts.length === (summary ? 1 : 0)) {
+    const fallback = htmlToText(job.descriptionWork ?? job.descriptionAppeal ?? job.title ?? '')
+    if (fallback) parts.push(fallback)
+  }
+  return parts.join('\n\n')
 }
 
 // ===== 画像（og:image 相当。1:1 白余白変換） =====
@@ -234,15 +264,16 @@ function toRow(job: Job): Record<string, string> | null {
   const img = imageLink(job)
   if (!img) return null // 画像なしは配信不可
 
-  const descSrc = htmlToText(buildDescriptionHtml(job))
+  const parsed = parseAddressPrefMuni(job.addressPrefMuni)
+  const region = job.prefecture?.region ?? parsed.region ?? ''
+  const locality = job.municipality?.name ?? parsed.locality ?? ''
+
+  const descSrc = buildDescriptionText(job, region, locality)
   const desc = sanitize(descSrc)
   const removalRate = 1 - desc.clean.length / Math.max(1, descSrc.length)
   const dropCount = desc.flags.filter((f) => f.startsWith('[DROP]')).length
   if (removalRate > 0.35 || desc.clean.length < 120 || dropCount >= 3 || hasResidualPictograph(desc.clean)) return null
 
-  const parsed = parseAddressPrefMuni(job.addressPrefMuni)
-  const region = job.prefecture?.region ?? parsed.region ?? ''
-  const locality = job.municipality?.name ?? parsed.locality ?? ''
   const titleS = sanitize(`${titleRaw}${locality ? `（${locality}）` : ''}`)
 
   return {
@@ -270,8 +301,14 @@ function toRow(job: Job): Record<string, string> | null {
 }
 
 // ===== TSV =====
+// 改行を含むフィールド（description）は RFC4180 準拠のダブルクォートで包む。
+// Meta の CSV/TSV 取り込みは引用符付きフィールド内の改行をサポート。
 function toTSV(rows: Record<string, string>[]): string {
-  const esc = (v: string) => String(v ?? '').replace(/[\t\r\n]+/g, ' ')
+  const esc = (v: string) => {
+    let s = String(v ?? '').replace(/\r\n?/g, '\n').replace(/\t/g, ' ')
+    if (/[\n"]/.test(s)) s = `"${s.replace(/"/g, '""')}"`
+    return s
+  }
   const lines = [HEADERS.join('\t')]
   for (const r of rows) lines.push(HEADERS.map((h) => esc(r[h])).join('\t'))
   return lines.join('\n')
