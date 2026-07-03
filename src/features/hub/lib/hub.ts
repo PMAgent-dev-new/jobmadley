@@ -32,7 +32,43 @@ export const hubUrl = {
   prefecture: (prefSlug: string) => `/jobs/${prefSlug}`,
   prefectureCategory: (prefSlug: string, catSlug: string) => `/jobs/${prefSlug}/${catSlug}`,
   category: (catSlug: string) => `/jobs/category/${catSlug}`,
+  group: (groupSlug: string) => `/jobs/group/${groupSlug}`,
 }
+
+/**
+ * 職種グループ（複数職種をまとめた上位ハブ）。CMSの category 列は入力が不完全なため
+ * グルーピングはコード側で定義する。catSlugs は jobcategories の slug。
+ */
+export interface HubGroup {
+  slug: string
+  name: string
+  /** 含める職種の slug */
+  catSlugs: string[]
+  lead: string
+}
+export const HUB_GROUPS: HubGroup[] = [
+  {
+    slug: "driver",
+    name: "ドライバー職",
+    catSlugs: ["taxi-driver", "bus-driver", "hire-driver", "truck-driver"],
+    lead: "タクシー・バス・ハイヤー・トラックなど、人やモノを運ぶドライバー職の求人をまとめました。二種免許・大型免許の取得支援や未経験歓迎の求人も多く、地域や車種から自分に合った働き方を選べます。",
+  },
+  {
+    slug: "mechanic",
+    name: "整備士",
+    catSlugs: ["car-mechanic", "bike-mechanic"],
+    lead: "自動車・バイクの整備士求人をまとめました。点検・車検・修理など手に職をつけられる専門職で、未経験から資格取得を支援する求人も多数。整備分野・地域から求人を探せます。",
+  },
+  {
+    slug: "management",
+    name: "管理・事務職",
+    catSlugs: ["operation-manager", "sales", "back-office"],
+    lead: "運行管理者・営業・バックオフィスなど、運送/旅客事業を支える管理・事務職の求人をまとめました。資格を活かせる専門職からデスクワークまで、幅広い働き方から選べます。",
+  },
+]
+export const findGroup = (slug: string): HubGroup | undefined => HUB_GROUPS.find((g) => g.slug === slug)
+export const groupForCatSlug = (catSlug: string): HubGroup | undefined =>
+  HUB_GROUPS.find((g) => g.catSlugs.includes(catSlug))
 
 /** 全件を見るための絞り込み検索URL（/search はUI用・noindex） */
 export const searchUrl = (params: { prefectureId?: string; jobCategoryId?: string }) => {

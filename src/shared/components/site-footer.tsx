@@ -111,6 +111,12 @@ export default function SiteFooter() {
           <div>
             <h3 className={styles.colTitle}>職種から探す</h3>
             <ul className={styles.list}>
+              <li>
+                <Link href="/jobs/group/driver" className={styles.link}>ドライバー職の求人</Link>
+              </li>
+              <li>
+                <Link href="/jobs/group/mechanic" className={styles.link}>整備士の求人</Link>
+              </li>
               {FOOTER_CATEGORY_LINKS.map((c) => (
                 <li key={c.slug}>
                   <Link href={`/jobs/category/${c.slug}`} className={styles.link}>
