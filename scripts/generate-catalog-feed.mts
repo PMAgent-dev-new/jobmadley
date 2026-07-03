@@ -198,10 +198,17 @@ function extractTown(prefMuni: string | undefined, region: string, locality: str
 // Meta は日付として解釈できる street_address（例: 2001-1-15）を住所不備として弾く
 const DATE_LIKE_STREET = /^(19|20)\d{2}([-/]\d{1,2}){1,2}$/
 
-/** 町名+番地の street。町名が無く日付に見える場合は空にして住所全体の無効化を防ぐ */
+// microCMS 側の汚染: 番地が JS の Date 文字列に化けた行が多数ある
+// （例: "Tue Jun 01 1030 17:11:57 GMT+0918 (日本標準時)"。インポート時に番地が日付へ誤変換されたもの）。
+// 番地は復元不能なため捨て、町名のみを street とする。
+const JS_DATE_JUNK = /(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{3,4}|GMT[+-]\d{4}/
+
+/** 町名+番地の street。日付ゴミの番地は除去し、日付に見える値は空にして住所全体の無効化を防ぐ */
 function buildStreetAddress(job: Job, region: string, locality: string): string {
   const town = extractTown(job.addressPrefMuni, region, locality)
-  const street = `${town}${(job.addressLine || '').trim()}`.trim()
+  let line = (job.addressLine || '').trim()
+  if (JS_DATE_JUNK.test(line)) line = ''
+  const street = `${town}${line}`.trim()
   return DATE_LIKE_STREET.test(street) ? '' : street
 }
 
