@@ -203,11 +203,17 @@ const DATE_LIKE_STREET = /^(19|20)\d{2}([-/]\d{1,2}){1,2}$/
 // 番地は復元不能なため捨て、町名のみを street とする。
 const JS_DATE_JUNK = /(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{3,4}|GMT[+-]\d{4}/
 
-/** 町名+番地の street。日付ゴミの番地は除去し、日付に見える値は空にして住所全体の無効化を防ぐ */
+// 日付として解釈されうる番地（先頭4桁が年に見える 1030-6-1 / 2001-1-15 / 2007-20 等）と極端に短い番地。
+// これらは単体だと Meta の住所検証に落ちるため町名を前置する。3桁以下始まりの通常番地は従来どおり触らない。
+const NEEDS_TOWN = /^\d{4}([-/]\d{1,2}){1,2}$|^\d{1,2}$/
+
+/** street は原則 addressLine のみ（既存商品の再検証を発生させない）。
+ * 問題を起こす番地（日付様・極短）に限り町名を前置し、それでも日付様なら空にする。 */
 function buildStreetAddress(job: Job, region: string, locality: string): string {
-  const town = extractTown(job.addressPrefMuni, region, locality)
   let line = (job.addressLine || '').trim()
   if (JS_DATE_JUNK.test(line)) line = ''
+  if (!NEEDS_TOWN.test(line)) return line // 従来どおり＝変更なし
+  const town = extractTown(job.addressPrefMuni, region, locality)
   const street = `${town}${line}`.trim()
   return DATE_LIKE_STREET.test(street) ? '' : street
 }
