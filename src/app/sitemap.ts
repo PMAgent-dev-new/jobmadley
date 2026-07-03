@@ -5,6 +5,7 @@ import type { Job } from "@/features/jobs/types"
 import type { MicroCMSListResponse } from "@/shared/microcms/types"
 import {
   HUB_MIN_JOBS,
+  HUB_GROUPS,
   hubUrl,
   prefCatCount,
   withSlug,
@@ -29,6 +30,9 @@ const getHubRoutes = async (): Promise<MetadataRoute.Sitemap> => {
   }
   for (const c of withSlug(categories)) {
     routes.push({ url: `${SITE_URL}${hubUrl.category(c.slug)}`, changeFrequency: "daily", priority: 0.6 })
+  }
+  for (const g of HUB_GROUPS) {
+    routes.push({ url: `${SITE_URL}${hubUrl.group(g.slug)}`, changeFrequency: "daily", priority: 0.6 })
   }
   return routes
 }

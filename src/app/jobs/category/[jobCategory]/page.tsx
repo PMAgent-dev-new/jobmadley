@@ -19,6 +19,7 @@ import {
   catContent,
   parsePage,
   pagedUrl,
+  groupForCatSlug,
 } from "@/features/hub/lib/hub"
 
 // オンデマンドISR（レート制限回避のためビルド時一括SSGはしない。sitemapで全ハブをクロール可能に）
@@ -80,6 +81,7 @@ export default async function Page({ params, searchParams }: Props) {
     : jobs
   const stats = { ...computeHubStats(statsJobs), count: totalCount }
   const cc = catContent[cat.slug!]
+  const group = groupForCatSlug(cat.slug!)
 
   return (
     <HubPage
@@ -100,7 +102,12 @@ export default async function Page({ params, searchParams }: Props) {
       page={page}
       totalPages={totalPages}
       pageHref={(n) => pagedUrl(base, n)}
-      related={[{ title: `地域から${cat.name}を探す`, links: kensForCat }]}
+      related={[
+        ...(group
+          ? [{ title: `${group.name}の求人を見る`, links: [{ label: `${group.name}の求人一覧（全国）`, href: hubUrl.group(group.slug) }] }]
+          : []),
+        { title: `地域から${cat.name}を探す`, links: kensForCat },
+      ]}
     />
   )
 }

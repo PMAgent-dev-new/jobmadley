@@ -109,6 +109,44 @@ export const getJobCountsByPrefecture = async (): Promise<Record<string, number>
   return counts
 }
 
+/** 複数の職種カテゴリID をまたいで求人を取得（職種グループハブ用。jobCategory[or]連結）。 */
+export const getJobsByCategoryIds = async (params: {
+  categoryIds: string[]
+  orders?: string
+  limit: number
+  offset?: number
+}): Promise<{ contents: Job[]; totalCount: number }> => {
+  const { categoryIds, orders, limit, offset = 0 } = params
+  if (categoryIds.length === 0) return { contents: [], totalCount: 0 }
+  const filters = categoryIds.map((id) => `jobCategory[equals]${id}`).join("[or]")
+  const data = await fetchList<Job>({
+    endpoint: "jobs",
+    queries: { limit, offset, depth: 1, filters, ...(orders ? { orders } : {}) },
+    context: "getJobsByCategoryIds",
+  })
+  return { contents: data.contents, totalCount: data.totalCount }
+}
+
+/** 職種グループの傾向集計用に、該当求人「全件」を軽量フィールドで取得。 */
+export const getGroupJobsForStats = async (categoryIds: string[]): Promise<Job[]> => {
+  if (categoryIds.length === 0) return []
+  const filters = categoryIds.map((id) => `jobCategory[equals]${id}`).join("[or]")
+  const jobs: Job[] = []
+  const limit = 100
+  let offset = 0
+  while (true) {
+    const data = await fetchList<Job>({
+      endpoint: "jobs",
+      queries: { limit, offset, depth: 1, fields: "id,salaryMin,salaryMax,employmentType,companyName,tags", filters },
+      context: "getGroupJobsForStats",
+    })
+    jobs.push(...data.contents)
+    offset += data.limit
+    if (offset >= data.totalCount) break
+  }
+  return jobs
+}
+
 /**
  * ハブの傾向集計用に、条件に一致する求人「全件」を軽量フィールドで取得する。
  * 表示用の getJobsPaged(60件) では大きいハブで集計が不正確になるため、集計は全件ベースで行う。
