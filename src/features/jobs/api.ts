@@ -109,6 +109,50 @@ export const getJobCountsByPrefecture = async (): Promise<Record<string, number>
   return counts
 }
 
+/** 地域×職種の求人件数マトリクス。ハブページの生成対象選別（薄いページ除外）に使う。 */
+export interface JobCountMatrix {
+  /** prefectureId -> 件数 */
+  byPrefecture: Record<string, number>
+  /** jobCategoryId -> 件数 */
+  byCategory: Record<string, number>
+  /** `${prefectureId}:${jobCategoryId}` -> 件数 */
+  byPrefectureCategory: Record<string, number>
+}
+
+/**
+ * 求人全件を fields 絞りで1回ページング取得し、都道府県別・職種別・県×職種別を同時集計する。
+ * getJobCount の個別連打（レート制限で件数0縮退）を避けるための一括集計。
+ */
+export const getJobCountMatrix = async (): Promise<JobCountMatrix> => {
+  const byPrefecture: Record<string, number> = {}
+  const byCategory: Record<string, number> = {}
+  const byPrefectureCategory: Record<string, number> = {}
+  const limit = 100
+  let offset = 0
+
+  while (true) {
+    const data = await fetchList<Job>({
+      endpoint: "jobs",
+      queries: { limit, offset, fields: "id,prefecture.id,jobCategory.id" },
+      context: "getJobCountMatrix",
+    })
+    for (const job of data.contents) {
+      const p = job.prefecture?.id
+      const c = job.jobCategory?.id
+      if (p) byPrefecture[p] = (byPrefecture[p] ?? 0) + 1
+      if (c) byCategory[c] = (byCategory[c] ?? 0) + 1
+      if (p && c) {
+        const key = `${p}:${c}`
+        byPrefectureCategory[key] = (byPrefectureCategory[key] ?? 0) + 1
+      }
+    }
+    offset += data.limit
+    if (offset >= data.totalCount) break
+  }
+
+  return { byPrefecture, byCategory, byPrefectureCategory }
+}
+
 /** ページネーション用: limit と offset を指定して求人を取得 */
 export const getJobsPaged = async (
   params: GetJobsParams & { offset?: number },

@@ -3,6 +3,35 @@ import { SITE_URL } from "@/shared/lib/metadata"
 import { microcmsClient } from "@/shared/microcms/client"
 import type { Job } from "@/features/jobs/types"
 import type { MicroCMSListResponse } from "@/shared/microcms/types"
+import {
+  HUB_MIN_JOBS,
+  hubUrl,
+  prefCatCount,
+  withSlug,
+  getHubData,
+} from "@/features/hub/lib/hub"
+
+/** 地域×職種ハブページ群のsitemapエントリを生成（生成対象＝件数しきい値以上の県×職種＋全県＋全職種） */
+const getHubRoutes = async (): Promise<MetadataRoute.Sitemap> => {
+  const { prefectures, categories, matrix } = await getHubData()
+  const routes: MetadataRoute.Sitemap = []
+  for (const p of withSlug(prefectures)) {
+    routes.push({ url: `${SITE_URL}${hubUrl.prefecture(p.slug)}`, changeFrequency: "daily", priority: 0.6 })
+    for (const c of withSlug(categories)) {
+      if (prefCatCount(matrix, p.id, c.id) >= HUB_MIN_JOBS) {
+        routes.push({
+          url: `${SITE_URL}${hubUrl.prefectureCategory(p.slug, c.slug)}`,
+          changeFrequency: "daily",
+          priority: 0.7,
+        })
+      }
+    }
+  }
+  for (const c of withSlug(categories)) {
+    routes.push({ url: `${SITE_URL}${hubUrl.category(c.slug)}`, changeFrequency: "daily", priority: 0.6 })
+  }
+  return routes
+}
 
 const JOB_PAGE_SIZE = 100
 
@@ -70,5 +99,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.7,
   }))
 
-  return [...staticRoutes, ...jobRoutes]
+  const hubRoutes = await getHubRoutes()
+
+  return [...staticRoutes, ...hubRoutes, ...jobRoutes]
 }

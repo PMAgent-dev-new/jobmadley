@@ -24,7 +24,7 @@ export default function JobCategoriesSection({ categories }: JobCategoriesSectio
           {categories.map((c, i) => (
             <Link
               key={c.id}
-              href={`/search?jobCategory=${encodeURIComponent(c.id)}`}
+              href={c.slug ? `/jobs/category/${c.slug}` : `/search?jobCategory=${encodeURIComponent(c.id)}`}
               className={`${styles.tile} ${TILE_VARIANTS[i % TILE_VARIANTS.length]}`}
             >
               {c.name}

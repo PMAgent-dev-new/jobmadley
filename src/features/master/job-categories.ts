@@ -18,3 +18,13 @@ export const getJobCategoryById = async (jobCategoryId: string): Promise<JobCate
     contentId: jobCategoryId,
     context: "getJobCategoryById",
   })
+
+/** 職種カテゴリを slug で取得（存在しなければ null）。ハブページのURL解決に使用 */
+export const getJobCategoryBySlug = async (slug: string): Promise<JobCategory | null> => {
+  const data = await fetchList<JobCategory>({
+    endpoint: "jobcategories",
+    queries: { filters: `slug[equals]${slug}`, limit: 1 },
+    context: "getJobCategoryBySlug",
+  })
+  return data.contents[0] ?? null
+}

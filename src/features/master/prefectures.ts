@@ -18,7 +18,7 @@ export const getPrefectureGroups = async (): Promise<PrefectureGroup> => {
   prefectures.forEach((pref) => {
     const { area } = pref
     if (!groups[area]) groups[area] = []
-    groups[area].push({ id: pref.id, region: pref.region, area: pref.area })
+    groups[area].push({ id: pref.id, region: pref.region, area: pref.area, slug: pref.slug })
   })
   return groups
 }
@@ -30,3 +30,13 @@ export const getPrefectureById = async (prefectureId: string): Promise<Prefectur
     contentId: prefectureId,
     context: "getPrefectureById",
   })
+
+/** 都道府県を slug で取得（存在しなければ null）。ハブページのURL解決に使用 */
+export const getPrefectureBySlug = async (slug: string): Promise<Prefecture | null> => {
+  const data = await fetchList<Prefecture>({
+    endpoint: "prefectures",
+    queries: { filters: `slug[equals]${slug}`, limit: 1 },
+    context: "getPrefectureBySlug",
+  })
+  return data.contents[0] ?? null
+}

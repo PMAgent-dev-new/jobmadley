@@ -423,4 +423,66 @@ export const generateBreadcrumbStructuredData = (items: Array<{ name: string; ur
       item: item.url ? `${SITE_URL}${item.url}` : undefined,
     })),
   }
-} 
+}
+
+/**
+ * 地域×職種ハブページのメタデータ。
+ * /search（パラメータ付きは noindex）と異なり、ハブは index 対象＋自己参照 canonical を返す。
+ * canonicalPath はルート相対（例: '/jobs/tokyo/taxi-driver'）。
+ */
+export const generateHubMetadata = (params: {
+  title: string
+  description: string
+  canonicalPath: string
+}): Metadata => {
+  const { title, description, canonicalPath } = params
+  return {
+    title,
+    description,
+    alternates: { canonical: canonicalPath },
+    openGraph: {
+      title: `${title} | ${SITE_NAME}`,
+      description,
+      url: canonicalPath,
+      images: [OGP_IMAGE],
+      type: 'website',
+    },
+    robots: {
+      index: true,
+      follow: true,
+    },
+  }
+}
+
+/**
+ * 求人一覧（ハブ）の ItemList 構造化データ（URLのみ列挙）。
+ * Google は一覧への JobPosting 多重掲載を非推奨のため、個別 JobPosting は求人詳細のみに置き、
+ * ハブでは ItemList（各求人詳細URLへのポインタ）に留める。
+ */
+export const generateItemListStructuredData = (
+  items: Array<{ url: string; name?: string }>,
+) => ({
+  '@context': 'https://schema.org',
+  '@type': 'ItemList',
+  itemListElement: items.map((item, index) => ({
+    '@type': 'ListItem',
+    position: index + 1,
+    url: `${SITE_URL}${item.url}`,
+    ...(item.name ? { name: item.name } : {}),
+  })),
+})
+
+/**
+ * FAQPage 構造化データ。question/answer は本文に表示するFAQと完全一致させること。
+ */
+export const generateFaqStructuredData = (
+  faqs: Array<{ question: string; answer: string }>,
+) => ({
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqs.map((f) => ({
+    '@type': 'Question',
+    name: f.question,
+    acceptedAnswer: { '@type': 'Answer', text: f.answer },
+  })),
+})
