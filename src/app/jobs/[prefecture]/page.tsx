@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation"
 import type { Metadata } from "next"
 import HubPage from "@/features/hub/components/hub-page"
-import { getJobsPaged } from "@/features/jobs/api"
+import { getJobsPaged, getJobsForStats } from "@/features/jobs/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
 import {
   HUB_MIN_JOBS,
@@ -58,7 +58,8 @@ export default async function Page({ params }: Props) {
       href: hubUrl.prefectureCategory(pref.slug!, c.slug),
     }))
 
-  const stats = computeHubStats(jobs)
+  const statsJobs = totalCount > jobs.length ? await getJobsForStats({ prefectureId: pref.id }) : jobs
+  const stats = { ...computeHubStats(statsJobs), count: totalCount }
 
   return (
     <HubPage

@@ -77,10 +77,13 @@ export default async function JobPage({ params }: JobPageProps) {
   const jobPostingStructuredData = generateJobPostingStructuredData(job)
   const breadcrumbItems: Array<{ name: string; url?: string }> = [{ name: "トップページ", url: "/" }]
 
+  const prefSlug = job.prefecture?.slug
+  const catSlug = job.jobCategory?.slug
+
   if (job.prefecture?.id && job.prefecture.region) {
     breadcrumbItems.push({
       name: job.prefecture.region,
-      url: `/search?prefecture=${job.prefecture.id}`,
+      url: prefSlug ? `/jobs/${prefSlug}` : `/search?prefecture=${job.prefecture.id}`,
     })
   }
 
@@ -88,6 +91,14 @@ export default async function JobPage({ params }: JobPageProps) {
     breadcrumbItems.push({
       name: job.municipality.name,
       url: `/search?prefecture=${job.prefecture.id}&municipality=${job.municipality.id}`,
+    })
+  }
+
+  // 職種ハブ（県×職種→職種全国の順）— 求人詳細からハブへの相互リンクを構造化データにも反映
+  if (job.jobCategory?.name && catSlug) {
+    breadcrumbItems.push({
+      name: job.jobCategory.name,
+      url: prefSlug ? `/jobs/${prefSlug}/${catSlug}` : `/jobs/category/${catSlug}`,
     })
   }
 
