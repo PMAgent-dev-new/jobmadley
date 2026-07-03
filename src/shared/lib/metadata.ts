@@ -255,7 +255,7 @@ const escapeHtml = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 /** 複数の説明セクションを結合した完全な求人説明 HTML を生成 */
-const buildJobDescriptionHtml = (job: JobDetail): string => {
+export const buildJobDescriptionHtml = (job: JobDetail): string => {
   const sections: Array<[string, string | undefined]> = [
     ['仕事内容', job.descriptionWork],
     ['アピールポイント', job.descriptionAppeal],
@@ -291,10 +291,14 @@ const VALID_THROUGH_FALLBACK_DAYS = 30
 export const generateJobPostingStructuredData = (job: JobDetail) => {
   const baseUrl = SITE_URL
 
-  if (!job.companyName) {
+  // 人材紹介で実雇用主名の掲載許諾が無い求人は hideCompanyName=true で「非公開」表示。
+  // 実名も非公開指定も無い（＝会社情報が無い）求人は markup を出さない。
+  if (!job.companyName && !job.hideCompanyName) {
     console.warn(`[JobPosting] companyName missing, skipping markup: job=${job.id}`)
     return null
   }
+  const orgName = job.hideCompanyName ? '非公開' : (job.companyName as string)
+  const showOrgIdentity = !job.hideCompanyName
 
   const parsed = parseAddressPrefMuni(job.addressPrefMuni)
   const addressRegion = job.prefecture?.region ?? parsed.region
@@ -306,16 +310,21 @@ export const generateJobPostingStructuredData = (job: JobDetail) => {
     console.warn(`[JobPosting] addressRegion unresolved: job=${job.id}`)
   }
 
-  // 掲載期限: 更新日（なければ公開日）+30日。期限が近い求人は revisedAt の更新で延長する運用。
+  // 掲載期限: CMSに掲載終了日(expiresAt)があれば正式値を使用。無ければ更新日(なければ公開日)+30日の暫定。
   // 期限切れ求人に markup を残すことは Google の品質ガイドライン違反（手動対応リスク）のため必須。
-  const validThroughBase =
-    job.revisedAt ?? job.updatedAt ?? job.publishedAt ?? job.createdAt
-  const validThrough = validThroughBase
-    ? new Date(
-        new Date(validThroughBase).getTime() +
-          VALID_THROUGH_FALLBACK_DAYS * 24 * 60 * 60 * 1000,
-      ).toISOString()
-    : undefined
+  let validThrough: string | undefined
+  if (job.expiresAt) {
+    validThrough = new Date(job.expiresAt).toISOString()
+  } else {
+    const validThroughBase =
+      job.revisedAt ?? job.updatedAt ?? job.publishedAt ?? job.createdAt
+    validThrough = validThroughBase
+      ? new Date(
+          new Date(validThroughBase).getTime() +
+            VALID_THROUGH_FALLBACK_DAYS * 24 * 60 * 60 * 1000,
+        ).toISOString()
+      : undefined
+  }
 
   const streetAddress =
     [job.addressLine, job.addressBuilding].filter(Boolean).join(' ') || undefined
@@ -327,7 +336,7 @@ export const generateJobPostingStructuredData = (job: JobDetail) => {
     description: buildJobDescriptionHtml(job),
     identifier: {
       '@type': 'PropertyValue',
-      name: job.companyName,
+      name: orgName,
       value: job.id,
     },
     datePosted: job.publishedAt ?? job.createdAt,
@@ -335,8 +344,15 @@ export const generateJobPostingStructuredData = (job: JobDetail) => {
     employmentType: mapEmploymentType(job.employmentType),
     hiringOrganization: {
       '@type': 'Organization',
-      // sameAs に媒体URL(ridejob.jp)を入れると全雇用主が同一エンティティ扱いになるため出力しない
-      name: job.companyName,
+      name: orgName,
+      // 実雇用主の公式URL/ロゴは許諾済み(=実名表示)の求人のみ付与。
+      // 媒体URL(ridejob.jp)は入れない（全雇用主が同一エンティティ扱いになるため）。
+      ...(showOrgIdentity && job.companyUrl
+        ? { url: job.companyUrl, sameAs: job.companyUrl }
+        : {}),
+      ...(showOrgIdentity && job.companyLogo?.url
+        ? { logo: job.companyLogo.url }
+        : {}),
     },
     jobLocation: {
       '@type': 'Place',

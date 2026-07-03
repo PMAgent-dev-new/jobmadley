@@ -23,6 +23,15 @@ export interface JobBase {
   salaryMax?: number
   wageType?: string[]
   employmentType?: string[]
+  // --- 求人シンジケーション対応（CMSにフィールド追加後に有効化。未設定時は現挙動のまま） ---
+  /** 掲載終了日。JobPosting.validThrough に使用（無ければ更新日+30日にフォールバック） */
+  expiresAt?: string
+  /** 実雇用主の公式サイトURL。hiringOrganization.url / sameAs に使用 */
+  companyUrl?: string
+  /** 実雇用主ロゴ。hiringOrganization.logo に使用（許諾範囲内で） */
+  companyLogo?: JobImage
+  /** 実雇用主名を非公開にする（人材紹介の掲載許諾が無い求人向け。true で name=非公開） */
+  hideCompanyName?: boolean
   // microCMS メタデータ
   createdAt?: string
   updatedAt?: string
