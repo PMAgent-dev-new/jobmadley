@@ -1,10 +1,12 @@
 /**
  * 地域×職種ハブページ共通ロジック（URL・しきい値・リード文・共有データ）。
  */
+import { cache } from "react"
 import { unstable_cache } from "next/cache"
 import { getPrefectures } from "@/features/master/prefectures"
 import { getJobCategories } from "@/features/master/job-categories"
 import { getJobCountMatrix, type JobCountMatrix } from "@/features/jobs/api"
+import { fetchList } from "@/shared/microcms/fetcher"
 import type { Prefecture, JobCategory } from "@/features/master/types"
 import type { Job } from "@/features/jobs/types"
 
@@ -123,6 +125,31 @@ export const prefCatCount = (m: JobCountMatrix, prefId: string, catId: string): 
 /** slug を持ち、かつ件数条件を満たすものだけを対象にする小ヘルパー */
 export const withSlug = <T extends { slug?: string }>(items: T[]): (T & { slug: string })[] =>
   items.filter((i): i is T & { slug: string } => Boolean(i.slug))
+
+/**
+ * CMS(microCMS: hub-contents)で管理する任意のハブ本文。
+ * hubKey はハブのURLパス（例: /jobs/tokyo/taxi-driver）。未登録なら null（→テンプレにフォールバック）。
+ */
+export interface HubContent {
+  id: string
+  hubKey: string
+  lead?: string
+  body?: string
+}
+// React cache でリクエスト内メモ化 → generateMetadata と本体で二重取得しない
+export const getHubContent = cache(async (hubKey: string): Promise<HubContent | null> => {
+  try {
+    const data = await fetchList<HubContent>({
+      endpoint: "hub-contents",
+      queries: { filters: `hubKey[equals]${hubKey}`, limit: 1 },
+      context: "getHubContent",
+    })
+    return data.contents[0] ?? null
+  } catch {
+    // hub-contents 未作成やCMS一時障害時はテンプレ表示に落とす（ハブ自体は壊さない）
+    return null
+  }
+})
 
 // =====================
 // ハブ本文の独自コンテンツ（thin content 対策）

@@ -18,6 +18,7 @@ import {
   buildHubFaqs,
   parsePage,
   pagedUrl,
+  getHubContent,
 } from "@/features/hub/lib/hub"
 
 // オンデマンドISR（レート制限回避のためビルド時一括SSGはしない。sitemapで全ハブをクロール可能に）
@@ -36,9 +37,10 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
   if (!pref) return { title: "求人が見つかりません", robots: { index: false, follow: false } }
   const count = matrix.byPrefecture[pref.id] ?? 0
   const base = hubUrl.prefecture(pref.slug!)
+  const content = page <= 1 ? await getHubContent(base) : null
   const meta = generateHubMetadata({
     title: page > 1 ? `${hubTitle.prefecture(pref.region)}（${page}ページ目）` : `${hubTitle.prefecture(pref.region)}｜${count}件`,
-    description: hubLead.prefecture(pref.region, count),
+    description: content?.lead || hubLead.prefecture(pref.region, count),
     canonicalPath: pagedUrl(base, page),
   })
   if (page > 1) meta.robots = { index: false, follow: true }
@@ -76,6 +78,7 @@ export default async function Page({ params, searchParams }: Props) {
       : jobs
     : jobs
   const stats = { ...computeHubStats(statsJobs), count: totalCount }
+  const content = isFirst ? await getHubContent(base) : null
 
   return (
     <HubPage
@@ -84,7 +87,8 @@ export default async function Page({ params, searchParams }: Props) {
         { name: `${pref.region}の求人` },
       ]}
       h1={`${pref.region}のドライバー・整備士求人`}
-      lead={hubLead.prefecture(pref.region, totalCount)}
+      lead={content?.lead || hubLead.prefecture(pref.region, totalCount)}
+      bodyHtml={content?.body}
       summaryLabel={pref.region}
       summary={buildHubSummary(pref.region, stats)}
       stats={stats}
