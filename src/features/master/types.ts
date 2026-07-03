@@ -3,6 +3,8 @@ export interface Prefecture {
   id: string
   region: string
   area: string
+  /** URL用スラッグ（例: tokyo）。ハブページのパスに使用 */
+  slug?: string
 }
 
 /** 市区町村 */
@@ -23,6 +25,8 @@ export interface JobCategory {
   id: string
   name: string
   category?: string
+  /** URL用スラッグ（例: taxi-driver）。ハブページのパスに使用 */
+  slug?: string
 }
 
 /** 都道府県グループ (area 別 Prefecture[]) */
