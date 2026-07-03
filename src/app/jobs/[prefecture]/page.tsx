@@ -13,6 +13,9 @@ import {
   getHubData,
   prefCatCount,
   withSlug,
+  computeHubStats,
+  buildHubSummary,
+  buildHubFaqs,
 } from "@/features/hub/lib/hub"
 
 // オンデマンドISR（レート制限回避のためビルド時一括SSGはしない。sitemapで全ハブをクロール可能に）
@@ -55,6 +58,8 @@ export default async function Page({ params }: Props) {
       href: hubUrl.prefectureCategory(pref.slug!, c.slug),
     }))
 
+  const stats = computeHubStats(jobs)
+
   return (
     <HubPage
       breadcrumb={[
@@ -63,8 +68,12 @@ export default async function Page({ params }: Props) {
       ]}
       h1={`${pref.region}のドライバー・整備士求人`}
       lead={hubLead.prefecture(pref.region, totalCount)}
+      summaryLabel={pref.region}
+      summary={buildHubSummary(pref.region, stats)}
+      stats={stats}
       totalCount={totalCount}
       jobs={jobs}
+      faqs={buildHubFaqs({ region: pref.region, stats: { ...stats, count: totalCount } })}
       moreHref={searchUrl({ prefectureId: pref.id })}
       related={[{ title: `${pref.region}の職種から探す`, links: catsInKen }]}
     />

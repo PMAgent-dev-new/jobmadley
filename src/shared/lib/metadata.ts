@@ -471,3 +471,18 @@ export const generateItemListStructuredData = (
     ...(item.name ? { name: item.name } : {}),
   })),
 })
+
+/**
+ * FAQPage 構造化データ。question/answer は本文に表示するFAQと完全一致させること。
+ */
+export const generateFaqStructuredData = (
+  faqs: Array<{ question: string; answer: string }>,
+) => ({
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqs.map((f) => ({
+    '@type': 'Question',
+    name: f.question,
+    acceptedAnswer: { '@type': 'Answer', text: f.answer },
+  })),
+})

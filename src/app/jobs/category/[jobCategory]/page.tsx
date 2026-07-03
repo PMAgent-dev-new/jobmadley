@@ -13,6 +13,10 @@ import {
   getHubData,
   prefCatCount,
   withSlug,
+  computeHubStats,
+  buildHubSummary,
+  buildHubFaqs,
+  catContent,
 } from "@/features/hub/lib/hub"
 
 // オンデマンドISR（レート制限回避のためビルド時一括SSGはしない。sitemapで全ハブをクロール可能に）
@@ -57,6 +61,9 @@ export default async function Page({ params }: Props) {
       href: hubUrl.prefectureCategory(p.slug, cat.slug!),
     }))
 
+  const stats = computeHubStats(jobs)
+  const cc = catContent[cat.slug!]
+
   return (
     <HubPage
       breadcrumb={[
@@ -65,8 +72,13 @@ export default async function Page({ params }: Props) {
       ]}
       h1={`${cat.name}の求人・転職（全国）`}
       lead={hubLead.category(cat.name, totalCount)}
+      summaryLabel={`${cat.name}（全国）`}
+      summary={buildHubSummary(`全国の${cat.name}`, stats)}
+      stats={stats}
       totalCount={totalCount}
       jobs={jobs}
+      categoryContent={cc ? { catName: cat.name, ...cc } : undefined}
+      faqs={buildHubFaqs({ catName: cat.name, catSlug: cat.slug!, stats: { ...stats, count: totalCount } })}
       moreHref={searchUrl({ jobCategoryId: cat.id })}
       related={[{ title: `地域から${cat.name}を探す`, links: kensForCat }]}
     />

@@ -13,6 +13,10 @@ import {
   getHubData,
   prefCatCount,
   withSlug,
+  computeHubStats,
+  buildHubSummary,
+  buildHubFaqs,
+  catContent,
 } from "@/features/hub/lib/hub"
 
 // 求人詳細ページと同様、オンデマンドISR（初回アクセス/クロールで生成→1時間キャッシュ）。
@@ -63,6 +67,10 @@ export default async function Page({ params }: Props) {
     .filter((p) => p.id !== pref.id && prefCatCount(matrix, p.id, cat.id) >= HUB_MIN_JOBS)
     .map((p) => ({ label: `${p.region}の${cat.name}`, href: hubUrl.prefectureCategory(p.slug, cat.slug!) }))
 
+  const label = `${pref.region}の${cat.name}`
+  const stats = computeHubStats(jobs)
+  const cc = catContent[cat.slug!]
+
   return (
     <HubPage
       breadcrumb={[
@@ -70,12 +78,18 @@ export default async function Page({ params }: Props) {
         { name: pref.region, url: hubUrl.prefecture(pref.slug!) },
         { name: `${cat.name}求人` },
       ]}
-      h1={`${pref.region}の${cat.name}求人`}
+      h1={`${label}求人`}
       lead={hubLead.prefectureCategory(pref.region, cat.name, totalCount)}
+      summaryLabel={label}
+      summary={buildHubSummary(label, stats)}
+      stats={stats}
       totalCount={totalCount}
       jobs={jobs}
+      categoryContent={cc ? { catName: cat.name, ...cc } : undefined}
+      faqs={buildHubFaqs({ region: pref.region, catName: cat.name, catSlug: cat.slug!, stats: { ...stats, count: totalCount } })}
       moreHref={searchUrl({ prefectureId: pref.id, jobCategoryId: cat.id })}
       related={[
+        { title: `${cat.name}の求人をすべての地域で見る`, links: [{ label: `${cat.name}の求人一覧（全国）`, href: hubUrl.category(cat.slug!) }] },
         { title: `${pref.region}の他の職種から探す`, links: sameKenOtherCat },
         { title: `他の地域の${cat.name}を探す`, links: sameCatOtherKen.slice(0, 24) },
       ]}
