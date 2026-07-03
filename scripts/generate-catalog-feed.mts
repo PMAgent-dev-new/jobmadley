@@ -183,6 +183,50 @@ function parseAddressPrefMuni(s?: string): { region?: string; locality?: string 
   return { region: m[1], locality: m[2] }
 }
 
+/** addressPrefMuni から都道府県・市区町村を除いた残り（町名） */
+function extractTown(prefMuni: string | undefined, region: string, locality: string): string {
+  let s = String(prefMuni || '').replace(/\s+/g, '')
+  if (!s) return ''
+  const orig = s
+  const reg = region.replace(/\s+/g, '')
+  const loc = locality.replace(/\s+/g, '')
+  if (reg && s.startsWith(reg)) s = s.slice(reg.length)
+  if (loc && s.startsWith(loc)) s = s.slice(loc.length)
+  return s === orig ? '' : s // 何も削れない=表記が想定外→不明として空
+}
+
+// Meta は日付として解釈できる street_address（例: 2001-1-15）を住所不備として弾く
+const DATE_LIKE_STREET = /^(19|20)\d{2}([-/]\d{1,2}){1,2}$/
+
+// microCMS 側の汚染: 番地が JS の Date 文字列に化けた行が多数ある
+// （例: "Tue Jun 01 1030 17:11:57 GMT+0918 (日本標準時)"。インポート時に番地が日付へ誤変換されたもの）。
+// 番地は復元不能なため捨て、町名のみを street とする。
+const JS_DATE_JUNK = /(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{3,4}|GMT[+-]\d{4}/
+
+// 日付として解釈されうる番地（先頭4桁が年に見える 1030-6-1 / 2001-1-15 / 2007-20 等）と極端に短い番地。
+// これらは単体だと Meta の住所検証に落ちるため町名を前置する。3桁以下始まりの通常番地は従来どおり触らない。
+const NEEDS_TOWN = /^\d{4}([-/]\d{1,2}){1,2}$|^\d{1,2}$/
+
+/** street は原則 addressLine のみ（既存商品の再検証を発生させない）。
+ * 問題を起こす番地（日付様・極短）に限り町名を前置し、それでも日付様なら空にする。 */
+function buildStreetAddress(job: Job, region: string, locality: string): string {
+  let line = (job.addressLine || '').trim()
+  if (JS_DATE_JUNK.test(line)) line = ''
+  if (!NEEDS_TOWN.test(line)) return line // 従来どおり＝変更なし
+  const town = extractTown(job.addressPrefMuni, region, locality)
+  if (!town) return '' // 町名が無く保護できない番地は出さない（空streetは許容される）
+  const street = `${town}${line}`.trim()
+  return DATE_LIKE_STREET.test(street) ? '' : street
+}
+
+/** 郵便番号: 数字以外を除去し、先頭ゼロ欠落（microCMSが数値扱いで5-6桁化）を7桁に復元 */
+function formatPostal(zip?: string): string {
+  const digits = String(zip || '').replace(/\D/g, '')
+  if (!digits) return ''
+  const padded = digits.length >= 5 && digits.length < 7 ? digits.padStart(7, '0') : digits
+  return padded.length === 7 ? `${padded.slice(0, 3)}-${padded.slice(3)}` : ''
+}
+
 // ===== 説明テキスト（読みやすさ整形） =====
 // 1行目=要点サマリー（給与｜雇用形態｜勤務地）→ 空行 → 仕事内容本文（見出しラベル無し）
 // → 以降のセクションは【見出し】+改行。記号はMeta規定に沿い【】・｜のみ（装飾記号はhtmlToTextで除去済）。
@@ -236,11 +280,9 @@ function imageLink(job: Job): string {
 }
 
 // ===== フィード列 =====
-// address.* 列は出力しない: 広告表示・商品セット絞込(custom_label/product_tags)の
-// どちらにも使われない一方、Meta の住所検証(市町村の解決可否)でアップロード失敗が
-// 出続けるため撤去した。位置情報が必要になったら緯度経度を用意して再導入する。
 const HEADERS = [
   'id', 'title', 'description', 'availability', 'condition', 'price', 'link', 'image_link', 'brand',
+  'address.city', 'address.country', 'address.postal_code', 'address.region', 'address.street_address',
   'product_tags[0]', 'product_tags[1]',
   'custom_label_0', 'custom_label_1', 'custom_label_2', 'custom_label_3',
 ] as const
@@ -290,7 +332,11 @@ function toRow(job: Job): Record<string, string> | null {
     link: `https://ridejob.jp/job/${job.id}?utm_content=${job.id}&utm_source=meta&utm_medium=catalog`,
     image_link: img,
     brand: clip(job.companyName || 'RIDEJOB', 100),
-    'address.city': locality, // HEADERS非掲載＝Metaへは出力しない（確認用フィードの表示にのみ使用）
+    'address.city': locality,
+    'address.country': 'Japan',
+    'address.postal_code': formatPostal(job.addressZip),
+    'address.region': region,
+    'address.street_address': buildStreetAddress(job, region, locality),
     'product_tags[0]': cat,
     'product_tags[1]': region,
     'custom_label_0': cat, // 職種（商品セット第一軸）
