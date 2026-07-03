@@ -18,6 +18,15 @@
  */
 import { createClient } from 'microcms-js-sdk'
 import { put } from '@vercel/blob'
+import { readFileSync } from 'node:fs'
+
+// 市区町村→[緯度, 経度]（国土地理院ジオコーディングで事前生成した静的データ）。
+// Meta の住所検証は「有効な緯度経度 または 国+市町村」を要求するため、
+// 市町村名の解決に依存せず座標で常に有効化する。新しい市区町村が増えたら
+// 生成時に警告を出す（データ再生成は scripts/data/catalog-city-geo.json を更新）。
+const CITY_GEO: Record<string, [number, number]> = JSON.parse(
+  readFileSync(new URL('./data/catalog-city-geo.json', import.meta.url), 'utf-8'),
+)
 
 const SERVICE_DOMAIN = process.env.NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN
 const API_KEY = process.env.MICROCMS_API_KEY
@@ -283,6 +292,7 @@ function imageLink(job: Job): string {
 const HEADERS = [
   'id', 'title', 'description', 'availability', 'condition', 'price', 'link', 'image_link', 'brand',
   'address.city', 'address.country', 'address.postal_code', 'address.region', 'address.street_address',
+  'address.latitude', 'address.longitude',
   'product_tags[0]', 'product_tags[1]',
   'custom_label_0', 'custom_label_1', 'custom_label_2', 'custom_label_3',
 ] as const
@@ -313,6 +323,8 @@ function toRow(job: Job): Record<string, string> | null {
   const parsed = parseAddressPrefMuni(job.addressPrefMuni)
   const region = job.prefecture?.region ?? parsed.region ?? ''
   const locality = job.municipality?.name ?? parsed.locality ?? ''
+  const geo = CITY_GEO[`${region}${locality}`]
+  if (region && locality && !geo) console.warn(`[catalog-feed] 座標未登録の市区町村: ${region}${locality} (catalog-city-geo.json に追加してください)`)
 
   const descSrc = buildDescriptionText(job, region, locality)
   const desc = sanitize(descSrc)
@@ -337,6 +349,8 @@ function toRow(job: Job): Record<string, string> | null {
     'address.postal_code': formatPostal(job.addressZip),
     'address.region': region,
     'address.street_address': buildStreetAddress(job, region, locality),
+    'address.latitude': geo ? String(geo[0]) : '',
+    'address.longitude': geo ? String(geo[1]) : '',
     'product_tags[0]': cat,
     'product_tags[1]': region,
     'custom_label_0': cat, // 職種（商品セット第一軸）
