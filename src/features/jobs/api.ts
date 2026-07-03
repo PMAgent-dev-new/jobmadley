@@ -81,6 +81,34 @@ export const getJobCount = async ({
   return data.totalCount
 }
 
+/**
+ * 都道府県別の求人件数を一括集計する。
+ * トップページで47都道府県ぶん getJobCount を個別発火すると1リクエストで
+ * microCMS を約50コール消費しレート制限に達する（超過時は件数0表示に縮退する実バグ）ため、
+ * fields を絞った全件ページング（数コール）＋サーバー集計に置き換える。
+ */
+export const getJobCountsByPrefecture = async (): Promise<Record<string, number>> => {
+  const counts: Record<string, number> = {}
+  const limit = 100
+  let offset = 0
+
+  while (true) {
+    const data = await fetchList<Job>({
+      endpoint: "jobs",
+      queries: { limit, offset, fields: "id,prefecture.id" },
+      context: "getJobCountsByPrefecture",
+    })
+    for (const job of data.contents) {
+      const prefId = job.prefecture?.id
+      if (prefId) counts[prefId] = (counts[prefId] ?? 0) + 1
+    }
+    offset += data.limit
+    if (offset >= data.totalCount) break
+  }
+
+  return counts
+}
+
 /** ページネーション用: limit と offset を指定して求人を取得 */
 export const getJobsPaged = async (
   params: GetJobsParams & { offset?: number },

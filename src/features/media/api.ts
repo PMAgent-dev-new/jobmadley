@@ -4,7 +4,8 @@ import type { BlogArticle } from "./types"
 const fetchArticlesByCategory = async (categoryId: string): Promise<BlogArticle[]> => {
   const data = await fetchList<BlogArticle>({
     endpoint: "blogs",
-    queries: { filters: `category[equals]${categoryId}`, limit: 100, orders: "-publishedAt" },
+    // 実際に表示するのは3件のみ。抽出プールは12件で十分（旧: 100件×2カテゴリの過剰フェッチ）
+    queries: { filters: `category[equals]${categoryId}`, limit: 12, orders: "-publishedAt" },
     context: `getMediaArticles:category=${categoryId}`,
     client: "media",
   })
