@@ -19,6 +19,10 @@ interface JobPageProps {
   params: Promise<{ id: string }>
 }
 
+// 最重要SEOページの毎リクエストSSRを解消（オンデマンドISR・1時間キャッシュ）。
+// 求人更新の即時反映が必要になったら microCMS Webhook → revalidatePath(`/job/${id}`) を追加する。
+export const revalidate = 3600
+
 export async function generateMetadata({ params }: JobPageProps): Promise<Metadata> {
   const { id } = await params
 
@@ -93,10 +97,13 @@ export default async function JobPage({ params }: JobPageProps) {
   return (
     <div className="min-h-screen bg-white">
       <JobViewTracker id={job.id} name={job.jobName ?? job.title ?? undefined} />
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jobPostingStructuredData).replace(/</g, "\\u003c") }}
-      />
+      {/* companyName の無い求人は markup を出さない（generateJobPostingStructuredData が null を返す） */}
+      {jobPostingStructuredData && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jobPostingStructuredData).replace(/</g, "\\u003c") }}
+        />
+      )}
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbStructuredData).replace(/</g, "\\u003c") }}

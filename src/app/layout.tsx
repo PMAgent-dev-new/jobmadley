@@ -2,7 +2,11 @@ import type { Metadata, Viewport } from 'next'
 import { Inter, Zen_Maru_Gothic, Zen_Kaku_Gothic_New, Archivo_Black } from 'next/font/google'
 import { Suspense } from 'react'
 import './globals.css'
-import { baseMetadata } from '@/shared/lib/metadata'
+import {
+  baseMetadata,
+  generateOrganizationStructuredData,
+  generateWebSiteStructuredData,
+} from '@/shared/lib/metadata'
 import UTMCapture from '@/features/application/components/utm-capture'
 
 const inter = Inter({
@@ -78,9 +82,23 @@ export default function RootLayout({
         <link rel="dns-prefetch" href="//images.microcms-assets.io" />
         <link rel="dns-prefetch" href="//ridejob.jp" />
 
-        {/* Critical resource hints */}
-        <link rel="preload" href="/images/logo-ridejob.png" as="image" type="image/png" />
-        
+        {/* NOTE: ロゴの手動preloadは next/image の最適化URLと一致せず全ページ二重DLに
+            なっていたため削除（site-header 側の priority に委ねる） */}
+
+        {/* サイト共通の構造化データ（エンティティ確立: Organization / WebSite+SearchAction） */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(generateOrganizationStructuredData()).replace(/</g, '\\u003c'),
+          }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(generateWebSiteStructuredData()).replace(/</g, '\\u003c'),
+          }}
+        />
+
         {/* Favicon */}
         <link rel="icon" href="/images/favicon.png" sizes="any" />
         <link rel="apple-touch-icon" href="/images/favicon.png" />

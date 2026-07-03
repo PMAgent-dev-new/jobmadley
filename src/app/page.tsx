@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 import { getPrefectureGroups } from "@/features/master/prefectures"
-import { getJobCount, getJobs } from "@/features/jobs/api"
+import { getJobCountsByPrefecture, getJobs } from "@/features/jobs/api"
 import { getMediaArticles } from "@/features/media/api"
 import { withErrorHandling } from "@/shared/lib/error-handling"
 import SiteHeader from "@/shared/components/site-header"
@@ -17,37 +17,23 @@ import { getJobCategories } from "@/features/master/job-categories"
 import JobCategoriesSection from "@/features/jobs/components/job-categories-section"
 import { generateHomeMetadata } from "@/shared/lib/metadata"
 
-export const revalidate = 0
+// revalidate=0（毎リクエストSSR）は1ビューで microCMS を約52コール消費し
+// レート制限超過時に都道府県件数が0表示へ縮退していたため、5分ISRに変更。
+export const revalidate = 300
 export const metadata: Metadata = generateHomeMetadata()
 
 export default async function HomePage() {
-  const [prefectures, latestJobs, mediaArticles, tags, jobCategories] = await Promise.all([
+  const [prefectures, latestJobs, mediaArticles, tags, jobCategories, countMap] = await Promise.all([
     withErrorHandling(() => getPrefectureGroups(), "getPrefectureGroups"),
     withErrorHandling(() => getJobs({ limit: 4, orders: "-publishedAt" }), "getLatestJobs"),
     withErrorHandling(() => getMediaArticles(), "getMediaArticles"),
     withErrorHandling(() => getTags(), "getTags"),
     withErrorHandling(() => getJobCategories(), "getJobCategories"),
+    // 47都道府県×個別カウントを廃止し、fields絞りの全件ページング+集計（数コール）へ
+    withErrorHandling(() => getJobCountsByPrefecture(), "getJobCountsByPrefecture"),
   ])
 
   const { companyArticles, interviewArticles } = mediaArticles
-
-  // 各都道府県の求人数を取得
-  const prefList = Object.values(prefectures).flat()
-  const countEntries = await Promise.all(
-    prefList.map(async (pref) => {
-      try {
-        const count = await withErrorHandling(
-          () => getJobCount({ prefectureId: pref.id }),
-          `getJobCount-${pref.id}`
-        )
-        return [pref.id, count] as const
-      } catch (error) {
-        console.warn(`Failed to get job count for ${pref.region}:`, error)
-        return [pref.id, 0] as const
-      }
-    })
-  )
-  const countMap = Object.fromEntries(countEntries) as Record<string, number>
 
   return (
     <div className="min-h-screen bg-white">
