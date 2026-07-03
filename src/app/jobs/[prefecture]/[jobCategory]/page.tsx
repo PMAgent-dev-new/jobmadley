@@ -5,7 +5,7 @@ import { getJobsPaged, getJobsForStats } from "@/features/jobs/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
 import {
   HUB_MIN_JOBS,
-  HUB_LIST_LIMIT,
+  HUB_PAGE_SIZE,
   hubUrl,
   hubLead,
   hubTitle,
@@ -17,6 +17,8 @@ import {
   buildHubSummary,
   buildHubFaqs,
   catContent,
+  parsePage,
+  pagedUrl,
 } from "@/features/hub/lib/hub"
 
 // 求人詳細ページと同様、オンデマンドISR（初回アクセス/クロールで生成→1時間キャッシュ）。
@@ -26,10 +28,12 @@ export const revalidate = 3600
 
 interface Props {
   params: Promise<{ prefecture: string; jobCategory: string }>
+  searchParams: Promise<{ page?: string }>
 }
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
   const { prefecture, jobCategory } = await params
+  const page = parsePage((await searchParams).page)
   const { prefectures, categories, matrix } = await getHubData()
   const pref = prefectures.find((p) => p.slug === prefecture)
   const cat = categories.find((c) => c.slug === jobCategory)
@@ -37,15 +41,23 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     return { title: "求人が見つかりません", robots: { index: false, follow: false } }
   }
   const count = prefCatCount(matrix, pref.id, cat.id)
-  return generateHubMetadata({
-    title: `${hubTitle.prefectureCategory(pref.region, cat.name)}｜${count}件`,
+  const base = hubUrl.prefectureCategory(pref.slug!, cat.slug!)
+  const meta = generateHubMetadata({
+    title:
+      page > 1
+        ? `${hubTitle.prefectureCategory(pref.region, cat.name)}（${page}ページ目）`
+        : `${hubTitle.prefectureCategory(pref.region, cat.name)}｜${count}件`,
     description: hubLead.prefectureCategory(pref.region, cat.name, count),
-    canonicalPath: hubUrl.prefectureCategory(pref.slug!, cat.slug!),
+    canonicalPath: pagedUrl(base, page),
   })
+  // 2ページ目以降は独自本文が無いので noindex,follow（求人リンクのクロールは維持）
+  if (page > 1) meta.robots = { index: false, follow: true }
+  return meta
 }
 
-export default async function Page({ params }: Props) {
+export default async function Page({ params, searchParams }: Props) {
   const { prefecture, jobCategory } = await params
+  const page = parsePage((await searchParams).page)
   const { prefectures, categories, matrix } = await getHubData()
   const pref = prefectures.find((p) => p.slug === prefecture)
   const cat = categories.find((c) => c.slug === jobCategory)
@@ -55,8 +67,11 @@ export default async function Page({ params }: Props) {
     prefectureId: pref.id,
     jobCategoryId: cat.id,
     orders: "-publishedAt",
-    limit: HUB_LIST_LIMIT,
+    limit: HUB_PAGE_SIZE,
+    offset: (page - 1) * HUB_PAGE_SIZE,
   })
+  const totalPages = Math.max(1, Math.ceil(totalCount / HUB_PAGE_SIZE))
+  const isFirst = page <= 1
 
   // 関連ハブ: 同じ県の他職種 / 同じ職種の他県（いずれも生成対象＝件数しきい値以上のみ）
   const sameKenOtherCat = withSlug(categories)
@@ -68,7 +83,13 @@ export default async function Page({ params }: Props) {
     .map((p) => ({ label: `${p.region}の${cat.name}`, href: hubUrl.prefectureCategory(p.slug, cat.slug!) }))
 
   const label = `${pref.region}の${cat.name}`
-  const statsJobs = totalCount > jobs.length ? await getJobsForStats({ prefectureId: pref.id, jobCategoryId: cat.id }) : jobs
+  const base = hubUrl.prefectureCategory(pref.slug!, cat.slug!)
+  // 傾向/職種解説/FAQは1ページ目のみ表示なので、集計取得も1ページ目に限定
+  const statsJobs = isFirst
+    ? totalCount > jobs.length
+      ? await getJobsForStats({ prefectureId: pref.id, jobCategoryId: cat.id })
+      : jobs
+    : jobs
   const stats = { ...computeHubStats(statsJobs), count: totalCount }
   const cc = catContent[cat.slug!]
 
@@ -86,9 +107,12 @@ export default async function Page({ params }: Props) {
       stats={stats}
       totalCount={totalCount}
       jobs={jobs}
-      categoryContent={cc ? { catName: cat.name, ...cc } : undefined}
-      faqs={buildHubFaqs({ region: pref.region, catName: cat.name, catSlug: cat.slug!, stats: { ...stats, count: totalCount } })}
+      categoryContent={isFirst && cc ? { catName: cat.name, ...cc } : undefined}
+      faqs={isFirst ? buildHubFaqs({ region: pref.region, catName: cat.name, catSlug: cat.slug!, stats }) : []}
       moreHref={searchUrl({ prefectureId: pref.id, jobCategoryId: cat.id })}
+      page={page}
+      totalPages={totalPages}
+      pageHref={(n) => pagedUrl(base, n)}
       related={[
         { title: `${cat.name}の求人をすべての地域で見る`, links: [{ label: `${cat.name}の求人一覧（全国）`, href: hubUrl.category(cat.slug!) }] },
         { title: `${pref.region}の他の職種から探す`, links: sameKenOtherCat },
