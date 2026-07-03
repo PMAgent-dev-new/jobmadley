@@ -214,6 +214,7 @@ function buildStreetAddress(job: Job, region: string, locality: string): string 
   if (JS_DATE_JUNK.test(line)) line = ''
   if (!NEEDS_TOWN.test(line)) return line // 従来どおり＝変更なし
   const town = extractTown(job.addressPrefMuni, region, locality)
+  if (!town) return '' // 町名が無く保護できない番地は出さない（空streetは許容される）
   const street = `${town}${line}`.trim()
   return DATE_LIKE_STREET.test(street) ? '' : street
 }
