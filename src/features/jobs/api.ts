@@ -109,6 +109,37 @@ export const getJobCountsByPrefecture = async (): Promise<Record<string, number>
   return counts
 }
 
+/**
+ * ハブの傾向集計用に、条件に一致する求人「全件」を軽量フィールドで取得する。
+ * 表示用の getJobsPaged(60件) では大きいハブで集計が不正確になるため、集計は全件ベースで行う。
+ */
+export const getJobsForStats = async (params: {
+  prefectureId?: string
+  jobCategoryId?: string
+}): Promise<Job[]> => {
+  const filters = buildJobFilters(params)
+  const jobs: Job[] = []
+  const limit = 100
+  let offset = 0
+  while (true) {
+    const data = await fetchList<Job>({
+      endpoint: "jobs",
+      queries: {
+        limit,
+        offset,
+        depth: 1,
+        fields: "id,salaryMin,salaryMax,employmentType,companyName,tags",
+        ...(filters ? { filters } : {}),
+      },
+      context: "getJobsForStats",
+    })
+    jobs.push(...data.contents)
+    offset += data.limit
+    if (offset >= data.totalCount) break
+  }
+  return jobs
+}
+
 /** 地域×職種の求人件数マトリクス。ハブページの生成対象選別（薄いページ除外）に使う。 */
 export interface JobCountMatrix {
   /** prefectureId -> 件数 */
