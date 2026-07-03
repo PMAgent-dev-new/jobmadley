@@ -174,11 +174,43 @@ function salaryBand(job: Job): string {
 const clip = (s: string, n: number): string => { const v = String(s || ''); return v.length > n ? v.slice(0, n) : v }
 
 // ===== 住所 =====
+// addressPrefMuni は「秋田県 秋田市 御所野下堤」のように空白区切りで町名まで含む。
+// 都道府県は2〜3文字+接尾辞に固定（非貪欲だと「京都府」が「京都」で切れるため）。
 function parseAddressPrefMuni(s?: string): { region?: string; locality?: string } {
   if (!s) return {}
-  const m = s.match(/^(.+?[都道府県])((?:.+?郡)?.+?[市区町村])?/)
+  const m = s.replace(/\s+/g, '').match(/^(.{2,3}[都道府県])((?:.+?郡)?.+?[市区町村])?/)
   if (!m) return {}
   return { region: m[1], locality: m[2] }
+}
+
+/** addressPrefMuni から都道府県・市区町村を除いた残り（町名） */
+function extractTown(prefMuni: string | undefined, region: string, locality: string): string {
+  let s = String(prefMuni || '').replace(/\s+/g, '')
+  if (!s) return ''
+  const orig = s
+  const reg = region.replace(/\s+/g, '')
+  const loc = locality.replace(/\s+/g, '')
+  if (reg && s.startsWith(reg)) s = s.slice(reg.length)
+  if (loc && s.startsWith(loc)) s = s.slice(loc.length)
+  return s === orig ? '' : s // 何も削れない=表記が想定外→不明として空
+}
+
+// Meta は日付として解釈できる street_address（例: 2001-1-15）を住所不備として弾く
+const DATE_LIKE_STREET = /^(19|20)\d{2}([-/]\d{1,2}){1,2}$/
+
+/** 町名+番地の street。町名が無く日付に見える場合は空にして住所全体の無効化を防ぐ */
+function buildStreetAddress(job: Job, region: string, locality: string): string {
+  const town = extractTown(job.addressPrefMuni, region, locality)
+  const street = `${town}${(job.addressLine || '').trim()}`.trim()
+  return DATE_LIKE_STREET.test(street) ? '' : street
+}
+
+/** 郵便番号: 数字以外を除去し、先頭ゼロ欠落（microCMSが数値扱いで5-6桁化）を7桁に復元 */
+function formatPostal(zip?: string): string {
+  const digits = String(zip || '').replace(/\D/g, '')
+  if (!digits) return ''
+  const padded = digits.length >= 5 && digits.length < 7 ? digits.padStart(7, '0') : digits
+  return padded.length === 7 ? `${padded.slice(0, 3)}-${padded.slice(3)}` : ''
 }
 
 // ===== 説明テキスト（読みやすさ整形） =====
@@ -288,9 +320,9 @@ function toRow(job: Job): Record<string, string> | null {
     brand: clip(job.companyName || 'RIDEJOB', 100),
     'address.city': locality,
     'address.country': 'Japan',
-    'address.postal_code': (job.addressZip || '').replace(/^(\d{3})(\d{4})$/, '$1-$2'),
+    'address.postal_code': formatPostal(job.addressZip),
     'address.region': region,
-    'address.street_address': job.addressLine || '',
+    'address.street_address': buildStreetAddress(job, region, locality),
     'product_tags[0]': cat,
     'product_tags[1]': region,
     'custom_label_0': cat, // 職種（商品セット第一軸）
