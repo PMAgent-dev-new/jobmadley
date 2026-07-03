@@ -19,6 +19,7 @@ import {
   catContent,
   parsePage,
   pagedUrl,
+  getHubContent,
 } from "@/features/hub/lib/hub"
 
 // 求人詳細ページと同様、オンデマンドISR（初回アクセス/クロールで生成→1時間キャッシュ）。
@@ -42,12 +43,13 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
   }
   const count = prefCatCount(matrix, pref.id, cat.id)
   const base = hubUrl.prefectureCategory(pref.slug!, cat.slug!)
+  const content = page <= 1 ? await getHubContent(base) : null
   const meta = generateHubMetadata({
     title:
       page > 1
         ? `${hubTitle.prefectureCategory(pref.region, cat.name)}（${page}ページ目）`
         : `${hubTitle.prefectureCategory(pref.region, cat.name)}｜${count}件`,
-    description: hubLead.prefectureCategory(pref.region, cat.name, count),
+    description: content?.lead || hubLead.prefectureCategory(pref.region, cat.name, count),
     canonicalPath: pagedUrl(base, page),
   })
   // 2ページ目以降は独自本文が無いので noindex,follow（求人リンクのクロールは維持）
@@ -92,6 +94,7 @@ export default async function Page({ params, searchParams }: Props) {
     : jobs
   const stats = { ...computeHubStats(statsJobs), count: totalCount }
   const cc = catContent[cat.slug!]
+  const content = isFirst ? await getHubContent(base) : null
 
   return (
     <HubPage
@@ -101,7 +104,8 @@ export default async function Page({ params, searchParams }: Props) {
         { name: `${cat.name}求人` },
       ]}
       h1={`${label}求人`}
-      lead={hubLead.prefectureCategory(pref.region, cat.name, totalCount)}
+      lead={content?.lead || hubLead.prefectureCategory(pref.region, cat.name, totalCount)}
+      bodyHtml={content?.body}
       summaryLabel={label}
       summary={buildHubSummary(label, stats)}
       stats={stats}

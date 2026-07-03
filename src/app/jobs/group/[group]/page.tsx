@@ -14,6 +14,7 @@ import {
   parsePage,
   pagedUrl,
   findGroup,
+  getHubContent,
 } from "@/features/hub/lib/hub"
 
 // オンデマンドISR（sitemapで全ハブをクロール可能に）
@@ -42,9 +43,10 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
   const catIds = resolveCatIds(group, categories)
   const count = catIds.reduce((s, id) => s + (matrix.byCategory[id] ?? 0), 0)
   const base = hubUrl.group(group.slug)
+  const content = page <= 1 ? await getHubContent(base) : null
   const meta = generateHubMetadata({
     title: page > 1 ? `${group.name}の求人・転職（全国）（${page}ページ目）` : `${group.name}の求人・転職（全国）｜${count}件`,
-    description: group.lead,
+    description: content?.lead || group.lead,
     canonicalPath: pagedUrl(base, page),
   })
   if (page > 1) meta.robots = { index: false, follow: true }
@@ -71,6 +73,7 @@ export default async function Page({ params, searchParams }: Props) {
   const base = hubUrl.group(group.slug)
 
   const stats = { ...computeHubStats(isFirst ? await getGroupJobsForStats(catIds) : jobs), count: totalCount }
+  const content = isFirst ? await getHubContent(base) : null
 
   // 含まれる職種の全国ハブへのリンク（件数の多い順）
   const catLinks = group.catSlugs
@@ -87,7 +90,8 @@ export default async function Page({ params, searchParams }: Props) {
         { name: `${group.name}の求人` },
       ]}
       h1={`${group.name}の求人・転職（全国）`}
-      lead={group.lead}
+      lead={content?.lead || group.lead}
+      bodyHtml={content?.body}
       summaryLabel={`${group.name}（全国）`}
       summary={buildHubSummary(`全国の${group.name}`, stats)}
       stats={stats}

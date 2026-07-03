@@ -35,6 +35,8 @@ interface HubPageProps {
   jobs: Job[]
   /** 職種の解説（県×職種・職種ハブで表示。県ハブでは省略） */
   categoryContent?: HubCategoryContent
+  /** CMS(hub-contents)の手書き本文HTML（あれば表示） */
+  bodyHtml?: string
   faqs?: HubFaq[]
   moreHref?: string
   related?: HubRelatedGroup[]
@@ -64,6 +66,7 @@ export default function HubPage({
   totalCount,
   jobs,
   categoryContent,
+  bodyHtml,
   faqs = [],
   moreHref,
   related = [],
@@ -162,6 +165,14 @@ export default function HubPage({
               </div>
             </div>
           </section>
+        )}
+
+        {/* CMS(hub-contents)の手書き本文（1ページ目のみ・登録があれば） */}
+        {isFirstPage && bodyHtml && (
+          <section
+            className="mt-10 text-gray-700 leading-relaxed [&_h2]:text-xl [&_h2]:font-bold [&_h2]:text-gray-900 [&_h2]:mt-6 [&_h2]:mb-2 [&_h3]:font-semibold [&_h3]:text-gray-900 [&_h3]:mt-4 [&_p]:mt-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:mt-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:mt-2 [&_a]:text-primary [&_a]:underline"
+            dangerouslySetInnerHTML={{ __html: bodyHtml }}
+          />
         )}
 
         {/* 求人一覧 */}
