@@ -109,6 +109,32 @@ export const getJobCountsByPrefecture = async (): Promise<Record<string, number>
   return counts
 }
 
+/** 求人フィード(XML)用に、全求人を必要フィールド付きで取得する。 */
+export const getAllJobsForFeed = async (): Promise<JobDetail[]> => {
+  const fields = [
+    "id", "title", "jobName", "companyName", "companyUrl", "companyLogo", "hideCompanyName",
+    "prefecture", "municipality", "jobCategory",
+    "addressZip", "addressLine", "addressBuilding", "addressPrefMuni",
+    "salaryMin", "salaryMax", "wageType", "employmentType", "salaryNote",
+    "descriptionWork", "descriptionAppeal", "descriptionPerson", "descriptionBenefits",
+    "descriptionOther", "workHours", "holidays", "access", "catchCopy",
+    "publishedAt", "updatedAt", "revisedAt", "createdAt", "expiresAt",
+  ].join(",")
+  const jobs: JobDetail[] = []
+  let offset = 0
+  while (true) {
+    const data = await fetchList<JobDetail>({
+      endpoint: "jobs",
+      queries: { limit: 100, offset, depth: 1, fields },
+      context: "getAllJobsForFeed",
+    })
+    jobs.push(...data.contents)
+    offset += data.limit
+    if (offset >= data.totalCount) break
+  }
+  return jobs
+}
+
 /** 複数の職種カテゴリID をまたいで求人を取得（職種グループハブ用。jobCategory[or]連結）。 */
 export const getJobsByCategoryIds = async (params: {
   categoryIds: string[]
