@@ -14,6 +14,19 @@ export const HUB_MIN_JOBS = 5
 /** 1ハブに表示する求人カードの上限（超過分は絞り込み検索へ誘導） */
 export const HUB_LIST_LIMIT = 60
 
+/** 1ページあたりの求人表示件数（ページネーション） */
+export const HUB_PAGE_SIZE = 30
+
+/** ?page= を安全に整数ページ番号へ（不正値は1） */
+export const parsePage = (raw?: string): number => {
+  const n = Number(raw)
+  return Number.isInteger(n) && n >= 1 ? n : 1
+}
+
+/** クエリ付きページURL（page<=1 は素のハブURL＝正規） */
+export const pagedUrl = (base: string, page: number): string =>
+  page <= 1 ? base : `${base}?page=${page}`
+
 /** ハブURL生成（ルート相対） */
 export const hubUrl = {
   prefecture: (prefSlug: string) => `/jobs/${prefSlug}`,
