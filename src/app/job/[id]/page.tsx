@@ -19,6 +19,10 @@ interface JobPageProps {
   params: Promise<{ id: string }>
 }
 
+// 最重要SEOページの毎リクエストSSRを解消（オンデマンドISR・1時間キャッシュ）。
+// 求人更新の即時反映が必要になったら microCMS Webhook → revalidatePath(`/job/${id}`) を追加する。
+export const revalidate = 3600
+
 export async function generateMetadata({ params }: JobPageProps): Promise<Metadata> {
   const { id } = await params
 
@@ -73,10 +77,13 @@ export default async function JobPage({ params }: JobPageProps) {
   const jobPostingStructuredData = generateJobPostingStructuredData(job)
   const breadcrumbItems: Array<{ name: string; url?: string }> = [{ name: "トップページ", url: "/" }]
 
+  const prefSlug = job.prefecture?.slug
+  const catSlug = job.jobCategory?.slug
+
   if (job.prefecture?.id && job.prefecture.region) {
     breadcrumbItems.push({
       name: job.prefecture.region,
-      url: `/search?prefecture=${job.prefecture.id}`,
+      url: prefSlug ? `/jobs/${prefSlug}` : `/search?prefecture=${job.prefecture.id}`,
     })
   }
 
@@ -87,16 +94,27 @@ export default async function JobPage({ params }: JobPageProps) {
     })
   }
 
+  // 職種ハブ（県×職種→職種全国の順）— 求人詳細からハブへの相互リンクを構造化データにも反映
+  if (job.jobCategory?.name && catSlug) {
+    breadcrumbItems.push({
+      name: job.jobCategory.name,
+      url: prefSlug ? `/jobs/${prefSlug}/${catSlug}` : `/jobs/category/${catSlug}`,
+    })
+  }
+
   breadcrumbItems.push({ name: job.jobName ?? job.title ?? "求人詳細" })
   const breadcrumbStructuredData = generateBreadcrumbStructuredData(breadcrumbItems)
 
   return (
     <div className="min-h-screen bg-white">
       <JobViewTracker id={job.id} name={job.jobName ?? job.title ?? undefined} />
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(jobPostingStructuredData).replace(/</g, "\\u003c") }}
-      />
+      {/* companyName の無い求人は markup を出さない（generateJobPostingStructuredData が null を返す） */}
+      {jobPostingStructuredData && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jobPostingStructuredData).replace(/</g, "\\u003c") }}
+        />
+      )}
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbStructuredData).replace(/</g, "\\u003c") }}

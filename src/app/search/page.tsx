@@ -30,11 +30,16 @@ export async function generateMetadata({ searchParams }: SearchPageProps): Promi
 
   const base = generateSearchMetadata({})
 
+  // noindex のパラメータ付きURLに indexable な /search への canonical を併記すると
+  // 矛盾シグナルになる（Google は noindex ページからの canonical 併用を非推奨）。
+  // index する素の /search のみ self-canonical を出す。
   return {
     ...base,
-    alternates: {
-      canonical: "/search",
-    },
+    alternates: queryExists
+      ? undefined
+      : {
+          canonical: "/search",
+        },
     robots: queryExists
       ? {
           index: false,

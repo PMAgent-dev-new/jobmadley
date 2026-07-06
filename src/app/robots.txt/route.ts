@@ -36,8 +36,9 @@ export function GET() {
     "Allow: /",
     "Disallow: /api/",
     "Disallow: /preview/",
-    "Disallow: /job/standby/",
-    "Disallow: /apply/",
+    // 注: /job/standby/ と /apply/ は意図的に Disallow しない（PR #24）。
+    // 両ページは noindex メタを SSR 出力済みで、Disallow すると Googlebot が
+    // noindex を読めず「ブロック中だが索引済み」の宙吊り状態になるため。
     "",
     "# AI 学習・スクレイピング用クローラーはブロック（ai-train=no）",
     ...AI_TRAINING_BOTS.flatMap((bot) => [`User-agent: ${bot}`, "Disallow: /"]),

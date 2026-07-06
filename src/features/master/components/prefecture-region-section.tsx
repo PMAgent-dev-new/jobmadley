@@ -27,7 +27,7 @@ export default function RegionSearchSection({ prefectures, countMap }: RegionSea
                 {prefs.map((pref) => (
                   <Link
                     key={pref.id}
-                    href={`/search?prefecture=${encodeURIComponent(pref.id)}`}
+                    href={pref.slug ? `/jobs/${pref.slug}` : `/search?prefecture=${encodeURIComponent(pref.id)}`}
                     className={styles.prefLink}
                   >
                     {pref.region}

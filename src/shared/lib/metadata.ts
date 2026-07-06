@@ -5,10 +5,16 @@ import type { JobDetail, Job } from '@/features/jobs/types'
 // メタデータ設定
 // =====================
 
-export const SITE_NAME = 'ライドジョブ | タクシードライバー・自動車整備士・デリバリーの求人・転職サイト'
+// ブランド名（titleテンプレートのサフィックス）。旧値は説明文入り全角38字で、
+// 求人詳細のtitleが60〜80字になりSERPで切断・書き換えが発生していた（基準28〜32字）。
+export const SITE_NAME = 'ライドジョブ'
+// トップページ専用のフルタイトル（主要KWを含む説明付き）
+export const TOP_TITLE = 'ライドジョブ | タクシードライバー・自動車整備士・デリバリーの求人・転職サイト'
 export const SITE_DESCRIPTION = 'タクシードライバー、自動車整備士、フードデリバリー営業など、暮らしと街を支える仕事の求人情報サイト。あなたにぴったりの転職先を見つけよう。'
 export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://ridejob.jp'
+export const OPERATOR_NAME = '株式会社PM Agent'
 const OGP_IMAGE = '/images/OGP.png'
+const LOGO_IMAGE = '/images/logo-ridejob.png'
 
 /**
  * 基本のメタデータ
@@ -16,7 +22,7 @@ const OGP_IMAGE = '/images/OGP.png'
 export const baseMetadata: Metadata = {
   title: {
     template: `%s | ${SITE_NAME}`,
-    default: SITE_NAME,
+    default: TOP_TITLE,
   },
   description: SITE_DESCRIPTION,
   keywords: [
@@ -34,7 +40,7 @@ export const baseMetadata: Metadata = {
   ],
   authors: [{ name: SITE_NAME }],
   creator: SITE_NAME,
-  publisher: SITE_NAME,
+  publisher: OPERATOR_NAME,
   formatDetection: {
     email: false,
     address: false,
@@ -42,7 +48,7 @@ export const baseMetadata: Metadata = {
   },
   metadataBase: new URL(SITE_URL),
   openGraph: {
-    title: SITE_NAME,
+    title: TOP_TITLE,
     description: SITE_DESCRIPTION,
     url: SITE_URL,
     siteName: SITE_NAME,
@@ -51,7 +57,7 @@ export const baseMetadata: Metadata = {
         url: OGP_IMAGE,
         width: 1200,
         height: 630,
-        alt: `${SITE_NAME} - ${SITE_DESCRIPTION}`,
+        alt: TOP_TITLE,
       },
     ],
     locale: 'ja_JP',
@@ -59,7 +65,7 @@ export const baseMetadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: SITE_NAME,
+    title: TOP_TITLE,
     description: SITE_DESCRIPTION,
     images: [OGP_IMAGE],
   },
@@ -80,13 +86,14 @@ export const baseMetadata: Metadata = {
  * トップページのメタデータ
  */
 export const generateHomeMetadata = (): Metadata => ({
-  title: SITE_NAME,
+  // トップはテンプレートを使わずフルタイトルをそのまま出す
+  title: { absolute: TOP_TITLE },
   description: SITE_DESCRIPTION,
   alternates: {
     canonical: '/',
   },
   openGraph: {
-    title: SITE_NAME,
+    title: TOP_TITLE,
     description: SITE_DESCRIPTION,
     url: '/',
     images: [OGP_IMAGE],
@@ -116,7 +123,7 @@ export const generateSearchMetadata = (params: {
     title,
     description,
     openGraph: {
-      title: `${title} | ${SITE_NAME}`,
+      title,
       description,
       images: [OGP_IMAGE],
     },
@@ -149,7 +156,7 @@ export const generateJobMetadata = (job: JobDetail): Metadata => {
     title,
     description,
     openGraph: {
-      title: `${title} | ${SITE_NAME}`,
+      title,
       description,
       images: [
         {
@@ -248,7 +255,7 @@ const escapeHtml = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 /** 複数の説明セクションを結合した完全な求人説明 HTML を生成 */
-const buildJobDescriptionHtml = (job: JobDetail): string => {
+export const buildJobDescriptionHtml = (job: JobDetail): string => {
   const sections: Array<[string, string | undefined]> = [
     ['仕事内容', job.descriptionWork],
     ['アピールポイント', job.descriptionAppeal],
@@ -270,16 +277,57 @@ const buildJobDescriptionHtml = (job: JobDetail): string => {
   return html || escapeHtml(job.descriptionWork ?? job.descriptionAppeal ?? job.title ?? '')
 }
 
+/** 掲載期限のフォールバック日数（microCMSに掲載終了日フィールドが追加されるまでの暫定運用） */
+const VALID_THROUGH_FALLBACK_DAYS = 30
+
 /**
  * 構造化データの生成 (Google JobPosting 準拠)
  * @see https://developers.google.com/search/docs/appearance/structured-data/job-posting
+ *
+ * companyName が無い求人は hiringOrganization を正しく宣言できないため
+ * markup 自体を出力しない（不正確なエンティティ宣言はペナルティリスク）。
+ * その場合は null を返すので、呼び出し側で条件付きレンダリングすること。
  */
 export const generateJobPostingStructuredData = (job: JobDetail) => {
   const baseUrl = SITE_URL
 
+  // 人材紹介で実雇用主名の掲載許諾が無い求人は hideCompanyName=true で「非公開」表示。
+  // 実名も非公開指定も無い（＝会社情報が無い）求人は markup を出さない。
+  if (!job.companyName && !job.hideCompanyName) {
+    console.warn(`[JobPosting] companyName missing, skipping markup: job=${job.id}`)
+    return null
+  }
+  const orgName = job.hideCompanyName ? '非公開' : (job.companyName as string)
+  const showOrgIdentity = !job.hideCompanyName
+
   const parsed = parseAddressPrefMuni(job.addressPrefMuni)
   const addressRegion = job.prefecture?.region ?? parsed.region
   const addressLocality = job.municipality?.name ?? parsed.locality
+
+  if (!addressRegion) {
+    // 住所欠損は Google しごと検索の掲載要件（jobLocation）を満たせない。
+    // 無言で国コードのみに縮退せず、検知できるよう警告を出す（catalogスクリプトと同パターン）。
+    console.warn(`[JobPosting] addressRegion unresolved: job=${job.id}`)
+  }
+
+  // 掲載期限: CMSに掲載終了日(expiresAt)があれば正式値を使用。無ければ更新日(なければ公開日)+30日の暫定。
+  // 期限切れ求人に markup を残すことは Google の品質ガイドライン違反（手動対応リスク）のため必須。
+  let validThrough: string | undefined
+  if (job.expiresAt) {
+    validThrough = new Date(job.expiresAt).toISOString()
+  } else {
+    const validThroughBase =
+      job.revisedAt ?? job.updatedAt ?? job.publishedAt ?? job.createdAt
+    validThrough = validThroughBase
+      ? new Date(
+          new Date(validThroughBase).getTime() +
+            VALID_THROUGH_FALLBACK_DAYS * 24 * 60 * 60 * 1000,
+        ).toISOString()
+      : undefined
+  }
+
+  const streetAddress =
+    [job.addressLine, job.addressBuilding].filter(Boolean).join(' ') || undefined
 
   return {
     '@context': 'https://schema.org',
@@ -288,15 +336,23 @@ export const generateJobPostingStructuredData = (job: JobDetail) => {
     description: buildJobDescriptionHtml(job),
     identifier: {
       '@type': 'PropertyValue',
-      name: job.companyName ?? SITE_NAME,
+      name: orgName,
       value: job.id,
     },
     datePosted: job.publishedAt ?? job.createdAt,
+    validThrough,
     employmentType: mapEmploymentType(job.employmentType),
     hiringOrganization: {
       '@type': 'Organization',
-      name: job.companyName ?? '企業名非公開',
-      sameAs: baseUrl,
+      name: orgName,
+      // 実雇用主の公式URL/ロゴは許諾済み(=実名表示)の求人のみ付与。
+      // 媒体URL(ridejob.jp)は入れない（全雇用主が同一エンティティ扱いになるため）。
+      ...(showOrgIdentity && job.companyUrl
+        ? { url: job.companyUrl, sameAs: job.companyUrl }
+        : {}),
+      ...(showOrgIdentity && job.companyLogo?.url
+        ? { logo: job.companyLogo.url }
+        : {}),
     },
     jobLocation: {
       '@type': 'Place',
@@ -306,7 +362,7 @@ export const generateJobPostingStructuredData = (job: JobDetail) => {
         addressRegion,
         addressLocality,
         postalCode: job.addressZip,
-        streetAddress: job.addressLine,
+        streetAddress,
       },
     },
     baseSalary: job.salaryMin ? {
@@ -325,6 +381,51 @@ export const generateJobPostingStructuredData = (job: JobDetail) => {
 }
 
 /**
+ * サイト共通の Organization 構造化データ（エンティティ確立 = AIO引用の基盤）
+ * 電話番号は /about 記載の窓口と一致させること。
+ */
+export const generateOrganizationStructuredData = () => ({
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: SITE_NAME,
+  alternateName: 'RIDE JOB',
+  url: SITE_URL,
+  logo: `${SITE_URL}${LOGO_IMAGE}`,
+  description: SITE_DESCRIPTION,
+  parentOrganization: {
+    '@type': 'Organization',
+    name: OPERATOR_NAME,
+    url: 'https://pmagent.jp/',
+  },
+  contactPoint: {
+    '@type': 'ContactPoint',
+    telephone: '+81-3-6824-7476',
+    contactType: 'customer service',
+    areaServed: 'JP',
+    availableLanguage: 'Japanese',
+  },
+})
+
+/**
+ * サイト共通の WebSite 構造化データ（サイト内検索のSearchAction付き）
+ */
+export const generateWebSiteStructuredData = () => ({
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: SITE_NAME,
+  alternateName: 'RIDE JOB',
+  url: SITE_URL,
+  potentialAction: {
+    '@type': 'SearchAction',
+    target: {
+      '@type': 'EntryPoint',
+      urlTemplate: `${SITE_URL}/search?q={search_term_string}`,
+    },
+    'query-input': 'required name=search_term_string',
+  },
+})
+
+/**
  * パンくずリストの構造化データ
  */
 export const generateBreadcrumbStructuredData = (items: Array<{ name: string; url?: string }>) => {
@@ -338,4 +439,66 @@ export const generateBreadcrumbStructuredData = (items: Array<{ name: string; ur
       item: item.url ? `${SITE_URL}${item.url}` : undefined,
     })),
   }
-} 
+}
+
+/**
+ * 地域×職種ハブページのメタデータ。
+ * /search（パラメータ付きは noindex）と異なり、ハブは index 対象＋自己参照 canonical を返す。
+ * canonicalPath はルート相対（例: '/jobs/tokyo/taxi-driver'）。
+ */
+export const generateHubMetadata = (params: {
+  title: string
+  description: string
+  canonicalPath: string
+}): Metadata => {
+  const { title, description, canonicalPath } = params
+  return {
+    title,
+    description,
+    alternates: { canonical: canonicalPath },
+    openGraph: {
+      title: `${title} | ${SITE_NAME}`,
+      description,
+      url: canonicalPath,
+      images: [OGP_IMAGE],
+      type: 'website',
+    },
+    robots: {
+      index: true,
+      follow: true,
+    },
+  }
+}
+
+/**
+ * 求人一覧（ハブ）の ItemList 構造化データ（URLのみ列挙）。
+ * Google は一覧への JobPosting 多重掲載を非推奨のため、個別 JobPosting は求人詳細のみに置き、
+ * ハブでは ItemList（各求人詳細URLへのポインタ）に留める。
+ */
+export const generateItemListStructuredData = (
+  items: Array<{ url: string; name?: string }>,
+) => ({
+  '@context': 'https://schema.org',
+  '@type': 'ItemList',
+  itemListElement: items.map((item, index) => ({
+    '@type': 'ListItem',
+    position: index + 1,
+    url: `${SITE_URL}${item.url}`,
+    ...(item.name ? { name: item.name } : {}),
+  })),
+})
+
+/**
+ * FAQPage 構造化データ。question/answer は本文に表示するFAQと完全一致させること。
+ */
+export const generateFaqStructuredData = (
+  faqs: Array<{ question: string; answer: string }>,
+) => ({
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: faqs.map((f) => ({
+    '@type': 'Question',
+    name: f.question,
+    acceptedAnswer: { '@type': 'Answer', text: f.answer },
+  })),
+})

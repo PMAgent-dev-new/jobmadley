@@ -29,3 +29,7 @@ next-env.d.ts
 
 # macOS system files
 .DS_Store
+
+# ローカル実行時のフィード生成物（CIはBlobへ出力）
+/catalog-feed.tsv
+/catalog-feed-review.tsv

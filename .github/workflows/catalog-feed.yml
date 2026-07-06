@@ -1,0 +1,42 @@
+name: catalog-feed
+
+# RIDEJOB の Meta カタログフィードを microCMS から生成し、Vercel Blob の固定URLへ publish する定期ジョブ。
+# Meta のカタログはその固定URLを 6h ごとに pull する（Commerce Manager のデータソースに登録）。
+#
+# 必要な Secrets（Settings → Secrets and variables → Actions）:
+#   - NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN
+#   - MICROCMS_API_KEY
+#   - BLOB_READ_WRITE_TOKEN   (Vercel の Storage → Blob で発行)
+
+on:
+  schedule:
+    - cron: '0 */6 * * *' # 6時間ごと（UTC）
+  workflow_dispatch: {} # 手動実行も可
+
+concurrency:
+  group: catalog-feed
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Generate & publish catalog feed
+        run: npm run generate:catalog-feed
+        env:
+          NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN: ${{ secrets.NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN }}
+          MICROCMS_API_KEY: ${{ secrets.MICROCMS_API_KEY }}
+          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
