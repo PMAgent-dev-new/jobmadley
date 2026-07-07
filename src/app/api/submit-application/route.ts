@@ -5,9 +5,16 @@ import {
   detectMechanic,
   detectPmAgent,
   normalizeSource,
-  resolveSubmitBaseWebhook,
+  resolveBaseTarget,
   resolveSubmitNotificationWebhook,
 } from "@/shared/lark/routing"
+import { createBitableRecord, type BitableCreateResult } from "@/shared/lark/bitable"
+import {
+  buildFieldsForService,
+  resolveRidejobCompanyRecordId,
+  type ApplicationFields,
+} from "@/shared/lark/bitable-schema"
+import { notifyBaseRegistrationError } from "@/shared/lark/alert"
 import { sendMail } from "@/shared/mail/gmail"
 import { buildApplicantAutoReply, isValidEmail } from "@/shared/mail/applicantAutoReply"
 import { sendApplicantSms, type SmsChannel } from "@/shared/sms/applicantSms"
@@ -108,27 +115,28 @@ const buildInternalLarkCard = (input: ApplicationPayload, c: ClassifiedApplicati
   }
 }
 
-const buildBaseRegistrationPayload = (input: ApplicationPayload, c: ClassifiedApplication) => {
-  const appliedAt = new Date().toISOString()
-  const payload: Record<string, unknown> = {
-    lastName: input.lastName ?? "",
-    firstName: input.firstName ?? "",
-    lastNameKana: input.lastNameKana ?? "",
-    firstNameKana: input.firstNameKana ?? "",
-    birthDate: input.birthDate ?? "",
-    phone: input.phone ?? "",
-    email: input.email ?? "",
-    companyName: input.companyName ?? "",
-    jobName: input.jobName ?? "",
-    jobUrl: input.jobUrl ?? (input.jobId ? `https://ridejob.jp/job/${input.jobId}` : ""),
-    jobId: input.jobId ?? "",
-    applicationSource: input.applicationSource ?? "",
-    utmSource: input.utmSource ?? "",
-    utmMedium: input.utmMedium ?? "",
-    appliedAt,
+const buildBitableFields = (input: ApplicationPayload, c: ClassifiedApplication): ApplicationFields => {
+  const extraNotes: string[] = []
+  if (c.isStandby) extraNotes.push("流入チャネル: スタンバイ")
+  if (c.isKyujinbox) extraNotes.push("流入チャネル: 求人ボックス")
+  return {
+    lastName: input.lastName,
+    firstName: input.firstName,
+    lastNameKana: input.lastNameKana,
+    firstNameKana: input.firstNameKana,
+    birthDate: input.birthDate,
+    phone: input.phone,
+    email: input.email,
+    jobId: input.jobId,
+    jobName: input.jobName,
+    jobUrl: input.jobUrl ?? (input.jobId ? `https://ridejob.jp/job/${input.jobId}` : undefined),
+    companyName: input.companyName,
+    applicationSource: input.applicationSource,
+    utmSource: input.utmSource,
+    utmMedium: input.utmMedium,
+    appliedAtMillis: Date.now(),
+    extraNotes,
   }
-  if (c.isMechanic) payload.isStandby = c.isStandby
-  return payload
 }
 
 /** URL中の source クエリで applicationSource / jobUrl を補完 */
@@ -212,32 +220,51 @@ export async function POST(request: Request) {
     }
     console.log(`[INFO] Using ${notification.type} for notification`)
 
-    // Base登録Webhook選択（任意）
-    const base = resolveSubmitBaseWebhook(classification)
-    if (base.url) {
-      console.log(`[INFO] Using ${base.type} for base registration`)
-    } else {
-      console.log(`[INFO] ${base.type} is not configured, skipping base registration`)
-    }
+    // Base登録は bitable API へ（非致命）
+    const baseTarget = resolveBaseTarget(classification)
+    console.log(`[INFO] Base registration target: service=${baseTarget.service} table=${baseTarget.tableId}`)
 
     // 並列送信
-    const tasks: Promise<{
+    type TaskResult = {
       name: "notification" | "base_registration" | "applicant_mail" | "applicant_sms" | "meta_capi"
       ok: boolean
-    }>[] = []
+      base?: BitableCreateResult
+    }
+    const tasks: Promise<TaskResult>[] = []
 
     tasks.push(
       sendToLark(notification.url, buildInternalLarkCard(incoming, classification), "submit-application:notification").then(
         (r) => ({ name: "notification", ok: r.ok }),
       ),
     )
-    if (base.url) {
-      tasks.push(
-        sendToLark(base.url, buildBaseRegistrationPayload(incoming, classification), `submit-application:${base.type}`).then(
-          (r) => ({ name: "base_registration", ok: r.ok }),
-        ),
-      )
-    }
+    tasks.push(
+      (async (): Promise<TaskResult> => {
+        const appFields = buildBitableFields(incoming, classification)
+        if (baseTarget.service === "ridejob" && appFields.companyName) {
+          try {
+            appFields.companyRecordId = await resolveRidejobCompanyRecordId(appFields.companyName)
+            console.log(
+              appFields.companyRecordId
+                ? `[INFO] 得意先CRM linked: ${appFields.companyName} -> ${appFields.companyRecordId}`
+                : `[INFO] 得意先CRM not found for company: ${appFields.companyName}`,
+            )
+          } catch (error) {
+            console.warn("[WARNING] 得意先CRM lookup failed", error)
+          }
+        }
+        const bitableInput = buildFieldsForService(baseTarget.service, appFields)
+        const result = await createBitableRecord({
+          service: baseTarget.service,
+          tableId: baseTarget.tableId,
+          fields: bitableInput,
+        }).catch((error: unknown): BitableCreateResult => ({
+          ok: false,
+          status: 0,
+          message: error instanceof Error ? error.message : "bitable error",
+        }))
+        return { name: "base_registration", ok: result.ok, base: result }
+      })(),
+    )
 
     // 応募者向け自動返信（非致命。email 不正時はスキップ）
     if (isValidEmail(incoming.email)) {
@@ -298,7 +325,28 @@ export async function POST(request: Request) {
     }
     const baseResult = results.find((r) => r.name === "base_registration")
     if (baseResult && !baseResult.ok) {
-      console.warn("[WARNING] Base registration failed, but proceeding with success response")
+      const b = baseResult.base
+      console.warn(
+        `[WARNING] Base registration failed (service=${baseTarget.service}): status=${b?.status} message=${b?.message}`,
+      )
+      await notifyBaseRegistrationError({
+        route: "submit-application",
+        service: baseTarget.service,
+        tableId: baseTarget.tableId,
+        status: b?.status ?? 0,
+        code: b?.code,
+        message: b?.message,
+        applicant: {
+          name: `${incoming.lastName ?? ""} ${incoming.firstName ?? ""}`.trim() || undefined,
+          phone: incoming.phone,
+          email: incoming.email,
+        },
+        job: {
+          id: incoming.jobId,
+          name: incoming.jobName,
+          url: incoming.jobUrl,
+        },
+      }).catch((error) => console.error("[alert] notifyBaseRegistrationError failed", error))
     }
     const mailResult = results.find((r) => r.name === "applicant_mail")
     if (mailResult && !mailResult.ok) {
