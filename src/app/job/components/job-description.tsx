@@ -27,7 +27,7 @@ export default function JobDescription({ job }: JobDescriptionProps) {
             {formatSalary(job.salaryMin, job.salaryMax, job.wageType)}
           </div>
           {job.salaryNote && (
-            <p className="text-gray-600 text-sm mt-2 whitespace-pre-wrap">{job.salaryNote}</p>
+            <p className="text-gray-600 text-sm mt-2 whitespace-pre-wrap break-words">{job.salaryNote}</p>
           )}
         </div>
       )}
@@ -36,7 +36,7 @@ export default function JobDescription({ job }: JobDescriptionProps) {
       {job.workStyle && (
         <div className="border-t pt-8">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">勤務形態</h3>
-          <p className="text-gray-700 whitespace-pre-wrap">{job.workStyle}</p>
+          <p className="text-gray-700 whitespace-pre-wrap break-words">{job.workStyle}</p>
         </div>
       )}
 
@@ -44,7 +44,7 @@ export default function JobDescription({ job }: JobDescriptionProps) {
       {job.descriptionAppeal && (
         <div className="border-t pt-8">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">アピールポイント</h3>
-          <div className="text-gray-700 whitespace-pre-wrap">{job.descriptionAppeal}</div>
+          <div className="text-gray-700 whitespace-pre-wrap break-words">{job.descriptionAppeal}</div>
         </div>
       )}
 
@@ -62,7 +62,7 @@ export default function JobDescription({ job }: JobDescriptionProps) {
       <div className="border-t pt-8">
         <h3 className="text-lg font-semibold text-gray-800 mb-4">仕事内容</h3>
         {job.descriptionWork ? (
-          <div className="text-gray-700 mb-6 whitespace-pre-wrap">{job.descriptionWork}</div>
+          <div className="text-gray-700 mb-6 whitespace-pre-wrap break-words">{job.descriptionWork}</div>
         ) : (
           <p className="text-gray-700 mb-4">仕事内容なし</p>
         )}
@@ -72,7 +72,7 @@ export default function JobDescription({ job }: JobDescriptionProps) {
       {job.descriptionPerson && (
         <div className="border-t pt-8">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">求める人材</h3>
-          <div className="text-gray-700 whitespace-pre-wrap">{job.descriptionPerson}</div>
+          <div className="text-gray-700 whitespace-pre-wrap break-words">{job.descriptionPerson}</div>
         </div>
       )}
 
@@ -88,7 +88,7 @@ export default function JobDescription({ job }: JobDescriptionProps) {
       {job.holidays && (
         <div className="border-t pt-8">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">休日</h3>
-          <p className="text-gray-700 whitespace-pre-wrap">{job.holidays}</p>
+          <p className="text-gray-700 whitespace-pre-wrap break-words">{job.holidays}</p>
         </div>
       )}
 
@@ -123,7 +123,7 @@ export default function JobDescription({ job }: JobDescriptionProps) {
       {job.descriptionBenefits && (
         <div className="border-t pt-8">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">福利厚生</h3>
-          <div className="text-gray-700 whitespace-pre-wrap">{job.descriptionBenefits}</div>
+          <div className="text-gray-700 whitespace-pre-wrap break-words">{job.descriptionBenefits}</div>
         </div>
       )}
 
@@ -181,7 +181,7 @@ export default function JobDescription({ job }: JobDescriptionProps) {
       {job.descriptionOther && (
         <div className="border-t pt-8">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">その他</h3>
-          <div className="text-gray-700 whitespace-pre-wrap">{job.descriptionOther}</div>
+          <div className="text-gray-700 whitespace-pre-wrap break-words">{job.descriptionOther}</div>
         </div>
       )}
     </div>

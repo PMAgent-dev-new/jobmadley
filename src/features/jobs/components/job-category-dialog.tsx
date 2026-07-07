@@ -44,7 +44,7 @@ export default function JobCategoryDialog({
     <Dialog>
       <DialogTrigger asChild>
         <Card className="cursor-pointer hover:bg-gray-50">
-          <CardContent className="p-6 text-center">
+          <CardContent className="p-4 sm:p-6 text-center">
             <Briefcase className="w-8 h-8 text-blue-600 mx-auto mb-2" />
             <span className="text-gray-800 font-medium">募集職種から選択</span>
           </CardContent>
@@ -73,10 +73,10 @@ export default function JobCategoryDialog({
         </ScrollArea>
         <div className="flex justify-end pt-4 border-t mt-4 space-x-2">
           <DialogClose asChild>
-            <button className="px-4 py-2 text-sm text-gray-600 rounded hover:bg-gray-100">キャンセル</button>
+            <button className="min-h-[40px] inline-flex items-center justify-center px-4 py-2 text-sm text-gray-600 rounded hover:bg-gray-100">キャンセル</button>
           </DialogClose>
           <DialogClose asChild>
-            <Link href={buildHref(selected || "")} className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">
+            <Link href={buildHref(selected || "")} className="min-h-[40px] inline-flex items-center justify-center px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">
               適用
             </Link>
           </DialogClose>
