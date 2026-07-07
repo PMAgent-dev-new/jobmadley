@@ -30,6 +30,13 @@ interface ApplicationPayload {
   jobId?: string
   utmSource?: string
   utmMedium?: string
+  utmSourceFirst?: string
+  utmMediumFirst?: string
+  utmCampaign?: string
+  utmLastTouchAt?: string
+  utmFirstTouchAt?: string
+  fbclid?: string
+  gclid?: string
   applyEmail?: string
   metaEventId?: string
   [key: string]: unknown
@@ -41,6 +48,27 @@ interface ClassifiedApplication {
   isPmAgent: boolean
   isStandby: boolean
   isKyujinbox: boolean
+}
+
+/** 流入経路の「古い＝誤帰属の疑い」判定に使う日数しきい値。 */
+const ATTRIBUTION_WINDOW_DAYS = 7
+
+/** ISO 文字列から現在までの経過日数（切り捨て）。無効値は undefined。 */
+const daysSince = (iso: string | undefined): number | undefined => {
+  if (!iso) return undefined
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return undefined
+  const diffMs = Date.now() - t
+  if (diffMs < 0) return 0
+  return Math.floor(diffMs / (24 * 60 * 60 * 1000))
+}
+
+/** source/medium を "source / medium" 形式に整形（両方空なら undefined）。 */
+const formatTouch = (source: string | undefined, medium: string | undefined): string | undefined => {
+  const s = source?.trim()
+  const m = medium?.trim()
+  if (!s && !m) return undefined
+  return [s, m].filter(Boolean).join(" / ")
 }
 
 const buildInternalLarkCard = (
@@ -70,6 +98,8 @@ const buildInternalLarkCard = (
   const utmLines: string[] = []
   if (input.utmSource) utmLines.push(`流入元: ${input.utmSource}`)
   if (input.utmMedium) utmLines.push(`メディア: ${input.utmMedium}`)
+  if (input.utmCampaign) utmLines.push(`キャンペーン: ${input.utmCampaign}`)
+
   // 生値のブレを吸収した正規化チャネルを併記（direct/不明は省略）
   const { channel, label: channelLabel } = classifyChannel(
     input.utmSource,
@@ -77,6 +107,23 @@ const buildInternalLarkCard = (
     input.applicationSource,
   )
   if (channel !== "direct") utmLines.push(`チャネル: ${channelLabel}`)
+
+  // 最終接触からの経過日数を併記し、古いクリックによる誤帰属に気づけるようにする
+  const elapsedDays = daysSince(input.utmLastTouchAt)
+  if (elapsedDays !== undefined) {
+    const staleMark = elapsedDays >= ATTRIBUTION_WINDOW_DAYS ? ` ⚠️(${elapsedDays}日前のクリック)` : ""
+    utmLines.push(`最終接触: ${elapsedDays}日前${staleMark}`)
+  }
+
+  // 初回接触が最終接触と異なる場合のみ併記（流入の起点を可視化）
+  const first = formatTouch(input.utmSourceFirst, input.utmMediumFirst)
+  const last = formatTouch(input.utmSource, input.utmMedium)
+  if (first && first !== last) utmLines.push(`初回接触: ${first}`)
+
+  if (input.fbclid || input.gclid) {
+    const ids = [input.fbclid ? "fbclid" : "", input.gclid ? "gclid" : ""].filter(Boolean).join(" / ")
+    utmLines.push(`クリックID: ${ids}`)
+  }
 
   let titleEmoji = "🟦"
   let titleText = "ライドジョブ求人サイトから応募がありました！"
@@ -144,6 +191,14 @@ const buildBaseRegistrationPayload = (input: ApplicationPayload, c: ClassifiedAp
     applicationSource: input.applicationSource ?? "",
     utmSource: input.utmSource ?? "",
     utmMedium: input.utmMedium ?? "",
+    // 追加のアトリビューション詳細（既存カラムは非破壊。Base 側で必要な列だけ拾えばよい）
+    utmCampaign: input.utmCampaign ?? "",
+    utmSourceFirst: input.utmSourceFirst ?? "",
+    utmMediumFirst: input.utmMediumFirst ?? "",
+    utmFirstTouchAt: input.utmFirstTouchAt ?? "",
+    utmLastTouchAt: input.utmLastTouchAt ?? "",
+    fbclid: input.fbclid ?? "",
+    gclid: input.gclid ?? "",
     // 正規化チャネル（生値は上記のまま保持。集計はこの列でブレなく行える）
     channel: classifyChannel(input.utmSource, input.utmMedium, input.applicationSource).channel,
     appliedAt,
