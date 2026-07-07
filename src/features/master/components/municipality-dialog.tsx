@@ -48,7 +48,7 @@ export default function MunicipalityDialog({ prefectureId, prefectureName, keywo
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Card className="cursor-pointer hover:bg-gray-50">
-          <CardContent className="p-6 text-center">
+          <CardContent className="p-4 sm:p-6 text-center">
             <MapPin className="w-8 h-8 text-blue-600 mx-auto mb-2" />
             <span className="text-gray-800 font-medium">市区町村から選択</span>
           </CardContent>

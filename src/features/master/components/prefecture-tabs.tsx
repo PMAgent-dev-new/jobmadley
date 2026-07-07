@@ -14,15 +14,15 @@ export default function PrefectureTabsSection({ prefectures, countMap }: Prefect
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-8">
       <Tabs defaultValue="prefecture" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 mb-6">
-          <TabsTrigger value="prefecture" className="flex items-center justify-center">
-            <MapPin className="w-4 h-4 mr-2" />
+        <TabsList className="grid w-full grid-cols-3 mb-6 h-auto">
+          <TabsTrigger value="prefecture" className="flex items-center justify-center whitespace-normal min-w-0 leading-tight text-xs sm:text-sm px-1 sm:px-3 py-2 h-auto">
+            <MapPin className="w-4 h-4 mr-1 hidden sm:block" />
             <span className="text-gray-800 font-medium">都道府県から選択</span>
           </TabsTrigger>
-          <TabsTrigger value="employment" className="flex items-center">
+          <TabsTrigger value="employment" className="flex items-center justify-center whitespace-normal min-w-0 leading-tight text-xs sm:text-sm px-1 sm:px-3 py-2 h-auto">
             雇用形態 給与から選択
           </TabsTrigger>
-          <TabsTrigger value="features" className="flex items-center">
+          <TabsTrigger value="features" className="flex items-center justify-center whitespace-normal min-w-0 leading-tight text-xs sm:text-sm px-1 sm:px-3 py-2 h-auto">
             特徴から選択
           </TabsTrigger>
         </TabsList>

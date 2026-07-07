@@ -19,8 +19,9 @@ export function ConsentSection({ checked, onChange, errors }: ConsentSectionProp
           id="agreement"
           checked={checked}
           onCheckedChange={(value) => onChange(value as boolean)}
+          className="mt-0.5 h-5 w-5 sm:h-4 sm:w-4"
         />
-        <label htmlFor="agreement" className="text-sm leading-5">
+        <label htmlFor="agreement" className="text-sm leading-6 py-1">
           <Link
             href="/privacy"
             target="_blank"

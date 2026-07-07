@@ -17,17 +17,17 @@ export default function SearchPagination({
   }
 
   return (
-    <div className="flex justify-center mt-8 mb-8">
+    <div className="flex justify-center mt-8 mb-8 overflow-x-auto">
       <Pagination>
         <PaginationContent>
           {/* Previous */}
           <PaginationItem>
             {currentPage > 1 ? (
-              <PaginationLink href={buildPageHref(currentPage - 1)} className="px-6 py-2 border text-gray-700 flex items-center gap-1">
+              <PaginationLink href={buildPageHref(currentPage - 1)} className="px-3 sm:px-6 py-2 border text-gray-700 flex items-center gap-1">
                 <ChevronLeft className="w-4 h-4" /> 前へ
               </PaginationLink>
             ) : (
-              <span className="px-6 py-2 border bg-gray-100 text-gray-400 cursor-not-allowed flex items-center gap-1">
+              <span className="px-3 sm:px-6 py-2 border bg-gray-100 text-gray-400 cursor-not-allowed flex items-center gap-1">
                 <ChevronLeft className="w-4 h-4" /> 前へ
               </span>
             )}
@@ -64,11 +64,11 @@ export default function SearchPagination({
           {/* Next */}
           <PaginationItem>
             {currentPage < totalPages ? (
-              <PaginationLink href={buildPageHref(currentPage + 1)} className="px-6 py-2 border text-gray-700 flex items-center gap-1">
+              <PaginationLink href={buildPageHref(currentPage + 1)} className="px-3 sm:px-6 py-2 border text-gray-700 flex items-center gap-1">
                 次へ <ChevronRight className="w-4 h-4" />
               </PaginationLink>
             ) : (
-              <span className="px-6 py-2 border bg-gray-100 text-gray-400 cursor-not-allowed flex items-center gap-1">
+              <span className="px-3 sm:px-6 py-2 border bg-gray-100 text-gray-400 cursor-not-allowed flex items-center gap-1">
                 次へ <ChevronRight className="w-4 h-4" />
               </span>
             )}
