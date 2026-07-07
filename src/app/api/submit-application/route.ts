@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server"
-import { sendToLark } from "@/shared/lark/client"
 import {
   classifyChannel,
   detectCpOne,
@@ -7,8 +6,9 @@ import {
   detectPmAgent,
   normalizeSource,
   resolveBaseTarget,
-  resolveSubmitNotificationWebhook,
+  resolveSubmitNotificationTarget,
 } from "@/shared/lark/routing"
+import { notifyLark } from "@/shared/lark/notify"
 import { createBitableRecord, type BitableCreateResult } from "@/shared/lark/bitable"
 import {
   buildFieldsForService,
@@ -294,13 +294,15 @@ export async function POST(request: Request) {
       console.log(`[INFO] Test application detected (${test.reason}). Notification only; skipping base/mail/sms/capi.`)
     }
 
-    // 通知Webhook選択
-    const notification = resolveSubmitNotificationWebhook(classification)
-    if (!notification.url) {
-      console.error(`[ERROR] Lark webhook is not configured (${notification.type})`)
-      return NextResponse.json({ success: false, message: "Webhook not configured" }, { status: 500 })
+    // 通知先選択（chat_id=API優先 / url=Webhookフォールバック）
+    const notification = resolveSubmitNotificationTarget(classification)
+    if (!notification.chatId && !notification.url) {
+      console.error(`[ERROR] Lark notification target is not configured (${notification.type})`)
+      return NextResponse.json({ success: false, message: "Notification target not configured" }, { status: 500 })
     }
-    console.log(`[INFO] Using ${notification.type} for notification`)
+    console.log(
+      `[INFO] Notification target: type=${notification.type} service=${notification.service} chat=${notification.chatId ? "set" : "-"} webhook=${notification.url ? "set" : "-"}`,
+    )
 
     // Base登録は bitable API へ（非致命）。テスト応募は登録しない。
     const baseTarget = resolveBaseTarget(classification)
@@ -319,9 +321,12 @@ export async function POST(request: Request) {
     const tasks: Promise<TaskResult>[] = []
 
     tasks.push(
-      sendToLark(notification.url, buildInternalLarkCard(incoming, classification, test), "submit-application:notification").then(
-        (r) => ({ name: "notification", ok: r.ok }),
-      ),
+      notifyLark({
+        api: { service: notification.service, chatId: notification.chatId },
+        webhookUrl: notification.url,
+        payload: buildInternalLarkCard(incoming, classification, test),
+        context: "submit-application:notification",
+      }).then((r) => ({ name: "notification", ok: r.ok })),
     )
     if (!test.isTest) {
       tasks.push(

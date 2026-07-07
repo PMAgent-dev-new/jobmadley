@@ -128,32 +128,45 @@ export const resolveBaseTarget = (classification: JobClassification): BaseTarget
   return { service, tableId: SERVICE_TABLES[service].tableId }
 }
 
-// === 通知 Webhook（内部フォーム）===
+// === 通知先（chat_id=API優先 / url=Webhookフォールバック）===
+// 送信元アプリは Base と同じサービス分類を再利用（mechanic→mechanic / CP One→liftjob / 既定→ridejob）。
+// 当該アプリは宛先チャットのメンバーかつ im:message スコープを持つ必要がある。
 
-/**
- * 通知Webhook URL を選択（内部フォーム）。
- * 優先順: CP One > 整備士 > デフォルト
- */
-export const resolveSubmitNotificationWebhook = ({
-  isCpOne,
-  isMechanic,
-}: JobClassification): { url: string | undefined; type: string } => {
-  if (isCpOne) return { url: larkEnv.notificationCpOne(), type: "LARK_WEBHOOK_CPONE" }
-  if (isMechanic) return { url: larkEnv.notificationMechanic(), type: "LARK_WEBHOOK_MECHANIC" }
-  return { url: larkEnv.notification(), type: "LARK_WEBHOOK" }
+export interface NotificationTarget {
+  service: LarkServiceId
+  chatId: string | undefined
+  url: string | undefined
+  type: string
 }
 
-// === 通知 Webhook（求人ボックス連携）===
+/**
+ * 通知先を解決（内部フォーム）。優先順: CP One > 整備士 > デフォルト
+ */
+export const resolveSubmitNotificationTarget = (classification: JobClassification): NotificationTarget => {
+  const { isCpOne, isMechanic } = classification
+  const service = resolveBaseService(classification)
+  if (isCpOne) return { service, chatId: larkEnv.chatIdCpOne(), url: larkEnv.notificationCpOne(), type: "CPONE" }
+  if (isMechanic) return { service, chatId: larkEnv.chatIdMechanic(), url: larkEnv.notificationMechanic(), type: "MECHANIC" }
+  return { service, chatId: larkEnv.chatId(), url: larkEnv.notification(), type: "DEFAULT" }
+}
 
 /**
- * 通知Webhook URL を選択（求人ボックス連携）。
- * 優先順: CP One(求人ボックス用) > 整備士 > デフォルト
+ * 通知先を解決（求人ボックス連携）。
+ * CP One は専用 chat_id/Webhook があれば優先し、無ければ既定にフォールバック。
  */
-export const resolveKyujinboxNotificationWebhook = ({
-  isCpOne,
-  isMechanic,
-}: JobClassification): string | undefined => {
-  if (isCpOne && larkEnv.notificationCpOneKyujinbox()) return larkEnv.notificationCpOneKyujinbox()
-  if (isMechanic && larkEnv.notificationMechanic()) return larkEnv.notificationMechanic()
-  return larkEnv.notification()
+export const resolveKyujinboxNotificationTarget = (classification: JobClassification): NotificationTarget => {
+  const { isCpOne, isMechanic } = classification
+  const service = resolveBaseService(classification)
+  if (isCpOne) {
+    return {
+      service,
+      chatId: larkEnv.chatIdCpOneKyujinbox() ?? larkEnv.chatIdCpOne(),
+      url: larkEnv.notificationCpOneKyujinbox() ?? larkEnv.notification(),
+      type: "CPONE_KYUJINBOX",
+    }
+  }
+  if (isMechanic) {
+    return { service, chatId: larkEnv.chatIdMechanic(), url: larkEnv.notificationMechanic() ?? larkEnv.notification(), type: "MECHANIC" }
+  }
+  return { service, chatId: larkEnv.chatId(), url: larkEnv.notification(), type: "DEFAULT" }
 }
