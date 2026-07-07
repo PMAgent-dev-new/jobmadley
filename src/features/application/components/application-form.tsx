@@ -60,7 +60,19 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
 
     setIsLoading(true)
     try {
-      const { applicationSource, jobUrl, utmSource, utmMedium } = resolveApplyContext()
+      const {
+        applicationSource,
+        jobUrl,
+        utmSource,
+        utmMedium,
+        utmSourceFirst,
+        utmMediumFirst,
+        utmCampaign,
+        utmLastTouchAt,
+        utmFirstTouchAt,
+        fbclid,
+        gclid,
+      } = resolveApplyContext()
 
       const applicationData: ApplicationFormData = {
         lastName: data.lastName,
@@ -76,6 +88,13 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
         applicationSource,
         utmSource,
         utmMedium,
+        utmSourceFirst,
+        utmMediumFirst,
+        utmCampaign,
+        utmLastTouchAt,
+        utmFirstTouchAt,
+        fbclid,
+        gclid,
       }
 
       const metaEventId = genEventId()
