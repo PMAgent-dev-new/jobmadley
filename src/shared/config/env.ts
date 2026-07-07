@@ -38,6 +38,11 @@ export const larkEnv = {
   contact: () => requireEnv("LARK_CONTACT_WEBHOOK"),
   // エラー検知用（Base 登録失敗などをこの Webhook に通知）
   errorAlert: () => read("LARK_WEBHOOK_ERROR_ALERT"),
+  // 通知先 chat_id（設定時は im/v1/messages API を優先、失敗/未設定時は上記 Webhook にフォールバック）
+  chatId: () => read("LARK_CHAT_ID"),
+  chatIdCpOne: () => read("LARK_CHAT_ID_CPONE"),
+  chatIdMechanic: () => read("LARK_CHAT_ID_MECHANIC"),
+  chatIdCpOneKyujinbox: () => read("LARK_CHAT_ID_CPONE_KYUJINBOX"),
 }
 
 // Lark Open API 用の認証情報（サービス別）

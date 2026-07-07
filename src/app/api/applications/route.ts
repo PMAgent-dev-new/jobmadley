@@ -10,8 +10,10 @@ import {
   detectMechanic,
   detectPmAgent,
   resolveBaseTarget,
-  resolveKyujinboxNotificationWebhook,
+  resolveKyujinboxNotificationTarget,
+  type NotificationTarget,
 } from "@/shared/lark/routing"
+import { notifyLark } from "@/shared/lark/notify"
 import { createBitableRecord, type BitableCreateResult } from "@/shared/lark/bitable"
 import {
   buildFieldsForService,
@@ -245,6 +247,7 @@ export async function POST(request: Request) {
     const isCpOne = detectCpOne(companyName)
     let isMechanic = false
     let webhookUrl: string | undefined
+    let notifyTarget: NotificationTarget | undefined
 
     await appendDevLog("Incoming Request Body", body)
 
@@ -265,7 +268,7 @@ export async function POST(request: Request) {
       })
       if (!r || typeof r.totalCount !== "number" || r.totalCount === 0) {
         // 求人未存在通知
-        const fallbackWebhook = resolveKyujinboxNotificationWebhook({ isCpOne: false, isMechanic: false })
+        const fallbackWebhook = resolveKyujinboxNotificationTarget({ isCpOne: false, isMechanic: false }).url
         if (fallbackWebhook) {
           const applicantName =
             `${body?.applicant?.lastName ?? ""} ${body?.applicant?.firstName ?? ""}`.trim() ||
@@ -311,7 +314,8 @@ export async function POST(request: Request) {
 
       const fetchedApplyEmail = r.contents[0]?.applyEmail ?? ""
       isMechanic = detectMechanic(fetchedApplyEmail)
-      webhookUrl = resolveKyujinboxNotificationWebhook({ isCpOne, isMechanic })
+      notifyTarget = resolveKyujinboxNotificationTarget({ isCpOne, isMechanic })
+      webhookUrl = notifyTarget.url
     } catch (e) {
       console.error("[applications] Failed to verify job on microCMS:", e)
       return NextResponse.json({ success: false, message: "Upstream error while verifying job" }, { status: 502 })
@@ -375,14 +379,16 @@ export async function POST(request: Request) {
       })),
     }
 
-    const notifyResult = await sendToLark(webhookUrl, formatLarkMessage(mappedForFormatter), "applications:notify")
+    const notifyResult = await notifyLark({
+      api: { service: notifyTarget?.service ?? "ridejob", chatId: notifyTarget?.chatId },
+      webhookUrl,
+      payload: formatLarkMessage(mappedForFormatter),
+      context: "applications:notify",
+    })
     if (!notifyResult.ok) {
-      return NextResponse.json(
-        { success: false, message: notifyResult.message || "Failed to send to Lark" },
-        { status: notifyResult.status >= 400 ? notifyResult.status : 502 },
-      )
+      return NextResponse.json({ success: false, message: "Failed to send notification to Lark" }, { status: 502 })
     }
-    console.log("[applications] Successfully sent to Lark", { body: notifyResult.body })
+    console.log("[applications] Notification sent", { via: notifyResult.via })
 
     // 応募者向け自動返信（非致命。email 不正時はスキップ。生データ/求人未存在は既に return 済み）
     if (isValidEmail(normalized.applicant.email)) {
