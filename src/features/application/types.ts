@@ -13,4 +13,11 @@ export interface ApplicationFormData {
   applicationSource: string
   utmSource?: string
   utmMedium?: string
+  utmSourceFirst?: string
+  utmMediumFirst?: string
+  utmCampaign?: string
+  utmLastTouchAt?: string
+  utmFirstTouchAt?: string
+  fbclid?: string
+  gclid?: string
 }

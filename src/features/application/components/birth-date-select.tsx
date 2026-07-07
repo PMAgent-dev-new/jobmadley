@@ -30,9 +30,9 @@ export function BirthDateSelect({ setValue, errors }: BirthDateSelectProps) {
       </label>
       <div className="md:col-span-3">
         <div className="text-sm text-gray-600 mb-2">西暦</div>
-        <div className="flex gap-2 items-center">
+        <div className="flex flex-wrap gap-2 items-center">
           <Select onValueChange={(value) => setValue("birthYear", value)}>
-            <SelectTrigger className="w-24">
+            <SelectTrigger className="flex-1 min-w-0 sm:flex-none sm:w-24">
               <SelectValue placeholder="年" />
             </SelectTrigger>
             <SelectContent>
@@ -46,7 +46,7 @@ export function BirthDateSelect({ setValue, errors }: BirthDateSelectProps) {
           <span className="text-sm">年</span>
 
           <Select onValueChange={(value) => setValue("birthMonth", value)}>
-            <SelectTrigger className="w-20">
+            <SelectTrigger className="flex-1 min-w-0 sm:flex-none sm:w-20">
               <SelectValue placeholder="月" />
             </SelectTrigger>
             <SelectContent>
@@ -60,7 +60,7 @@ export function BirthDateSelect({ setValue, errors }: BirthDateSelectProps) {
           <span className="text-sm">月</span>
 
           <Select onValueChange={(value) => setValue("birthDay", value)}>
-            <SelectTrigger className="w-20">
+            <SelectTrigger className="flex-1 min-w-0 sm:flex-none sm:w-20">
               <SelectValue placeholder="日" />
             </SelectTrigger>
             <SelectContent>

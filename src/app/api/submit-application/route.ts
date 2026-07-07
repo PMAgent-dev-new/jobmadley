@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import {
+  classifyChannel,
   detectCpOne,
   detectMechanic,
   detectPmAgent,
@@ -19,6 +20,7 @@ import { sendMail } from "@/shared/mail/gmail"
 import { buildApplicantAutoReply, isValidEmail } from "@/shared/mail/applicantAutoReply"
 import { sendApplicantSms, type SmsChannel } from "@/shared/sms/applicantSms"
 import { sendMetaCapiLead } from "@/shared/meta/capi"
+import { detectTestApplication, type TestDetection } from "@/shared/application/testDetection"
 
 interface ApplicationPayload {
   lastName?: string
@@ -35,6 +37,13 @@ interface ApplicationPayload {
   jobId?: string
   utmSource?: string
   utmMedium?: string
+  utmSourceFirst?: string
+  utmMediumFirst?: string
+  utmCampaign?: string
+  utmLastTouchAt?: string
+  utmFirstTouchAt?: string
+  fbclid?: string
+  gclid?: string
   applyEmail?: string
   metaEventId?: string
   [key: string]: unknown
@@ -48,7 +57,32 @@ interface ClassifiedApplication {
   isKyujinbox: boolean
 }
 
-const buildInternalLarkCard = (input: ApplicationPayload, c: ClassifiedApplication) => {
+/** 流入経路の「古い＝誤帰属の疑い」判定に使う日数しきい値。 */
+const ATTRIBUTION_WINDOW_DAYS = 7
+
+/** ISO 文字列から現在までの経過日数（切り捨て）。無効値は undefined。 */
+const daysSince = (iso: string | undefined): number | undefined => {
+  if (!iso) return undefined
+  const t = Date.parse(iso)
+  if (Number.isNaN(t)) return undefined
+  const diffMs = Date.now() - t
+  if (diffMs < 0) return 0
+  return Math.floor(diffMs / (24 * 60 * 60 * 1000))
+}
+
+/** source/medium を "source / medium" 形式に整形（両方空なら undefined）。 */
+const formatTouch = (source: string | undefined, medium: string | undefined): string | undefined => {
+  const s = source?.trim()
+  const m = medium?.trim()
+  if (!s && !m) return undefined
+  return [s, m].filter(Boolean).join(" / ")
+}
+
+const buildInternalLarkCard = (
+  input: ApplicationPayload,
+  c: ClassifiedApplication,
+  test?: TestDetection,
+) => {
   const appliedAt = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })
 
   const details = [
@@ -71,6 +105,32 @@ const buildInternalLarkCard = (input: ApplicationPayload, c: ClassifiedApplicati
   const utmLines: string[] = []
   if (input.utmSource) utmLines.push(`流入元: ${input.utmSource}`)
   if (input.utmMedium) utmLines.push(`メディア: ${input.utmMedium}`)
+  if (input.utmCampaign) utmLines.push(`キャンペーン: ${input.utmCampaign}`)
+
+  // 生値のブレを吸収した正規化チャネルを併記（direct/不明は省略）
+  const { channel, label: channelLabel } = classifyChannel(
+    input.utmSource,
+    input.utmMedium,
+    input.applicationSource,
+  )
+  if (channel !== "direct") utmLines.push(`チャネル: ${channelLabel}`)
+
+  // 最終接触からの経過日数を併記し、古いクリックによる誤帰属に気づけるようにする
+  const elapsedDays = daysSince(input.utmLastTouchAt)
+  if (elapsedDays !== undefined) {
+    const staleMark = elapsedDays >= ATTRIBUTION_WINDOW_DAYS ? ` ⚠️(${elapsedDays}日前のクリック)` : ""
+    utmLines.push(`最終接触: ${elapsedDays}日前${staleMark}`)
+  }
+
+  // 初回接触が最終接触と異なる場合のみ併記（流入の起点を可視化）
+  const first = formatTouch(input.utmSourceFirst, input.utmMediumFirst)
+  const last = formatTouch(input.utmSource, input.utmMedium)
+  if (first && first !== last) utmLines.push(`初回接触: ${first}`)
+
+  if (input.fbclid || input.gclid) {
+    const ids = [input.fbclid ? "fbclid" : "", input.gclid ? "gclid" : ""].filter(Boolean).join(" / ")
+    utmLines.push(`クリックID: ${ids}`)
+  }
 
   let titleEmoji = "🟦"
   let titleText = "ライドジョブ求人サイトから応募がありました！"
@@ -89,6 +149,12 @@ const buildInternalLarkCard = (input: ApplicationPayload, c: ClassifiedApplicati
   } else if (c.isKyujinbox) {
     titleEmoji = "🟨"
     titleText = "求人ボックスからの応募がありました！"
+  }
+
+  // テスト応募は先頭に [TEST] を付与し、実応募と一目で区別できるようにする
+  if (test?.isTest) {
+    titleEmoji = "🧪"
+    titleText = `[TEST] ${titleText}（テスト判定: ${test.reason ?? "—"} / Base登録・自動連絡はスキップ）`
   }
 
   return {
@@ -119,6 +185,16 @@ const buildBitableFields = (input: ApplicationPayload, c: ClassifiedApplication)
   const extraNotes: string[] = []
   if (c.isStandby) extraNotes.push("流入チャネル: スタンバイ")
   if (c.isKyujinbox) extraNotes.push("流入チャネル: 求人ボックス")
+  // アトリビューション詳細（正規化チャネル・キャンペーン・初回接触・クリックID）を対応履歴メモに集約。
+  // 生の utmSource/utmMedium は下記フィールドで保持しつつ、集計用の正規化チャネルを併記する。
+  const { label: channelLabel } = classifyChannel(input.utmSource, input.utmMedium, input.applicationSource)
+  extraNotes.push(`チャネル: ${channelLabel}`)
+  if (input.utmCampaign) extraNotes.push(`キャンペーン: ${input.utmCampaign}`)
+  const firstTouch = [input.utmSourceFirst, input.utmMediumFirst].filter(Boolean).join(" / ")
+  if (firstTouch) extraNotes.push(`初回接触: ${firstTouch}`)
+  if (input.utmLastTouchAt) extraNotes.push(`最終接触日時: ${input.utmLastTouchAt}`)
+  if (input.fbclid) extraNotes.push(`fbclid: ${input.fbclid}`)
+  if (input.gclid) extraNotes.push(`gclid: ${input.gclid}`)
   return {
     lastName: input.lastName,
     firstName: input.firstName,
@@ -212,6 +288,12 @@ export async function POST(request: Request) {
       isKyujinbox: source === "kyujinbox",
     }
 
+    // テスト応募判定（実績を汚染しないよう Base登録・自動連絡・CAPI をスキップする）
+    const test = detectTestApplication(incoming)
+    if (test.isTest) {
+      console.log(`[INFO] Test application detected (${test.reason}). Notification only; skipping base/mail/sms/capi.`)
+    }
+
     // 通知先選択（chat_id=API優先 / url=Webhookフォールバック）
     const notification = resolveSubmitNotificationTarget(classification)
     if (!notification.chatId && !notification.url) {
@@ -222,9 +304,13 @@ export async function POST(request: Request) {
       `[INFO] Notification target: type=${notification.type} service=${notification.service} chat=${notification.chatId ? "set" : "-"} webhook=${notification.url ? "set" : "-"}`,
     )
 
-    // Base登録は bitable API へ（非致命）
+    // Base登録は bitable API へ（非致命）。テスト応募は登録しない。
     const baseTarget = resolveBaseTarget(classification)
-    console.log(`[INFO] Base registration target: service=${baseTarget.service} table=${baseTarget.tableId}`)
+    if (test.isTest) {
+      console.log(`[INFO] Test application; skipping base registration (service=${baseTarget.service})`)
+    } else {
+      console.log(`[INFO] Base registration target: service=${baseTarget.service} table=${baseTarget.tableId}`)
+    }
 
     // 並列送信
     type TaskResult = {
@@ -238,41 +324,43 @@ export async function POST(request: Request) {
       notifyLark({
         api: { service: notification.service, chatId: notification.chatId },
         webhookUrl: notification.url,
-        payload: buildInternalLarkCard(incoming, classification),
+        payload: buildInternalLarkCard(incoming, classification, test),
         context: "submit-application:notification",
       }).then((r) => ({ name: "notification", ok: r.ok })),
     )
-    tasks.push(
-      (async (): Promise<TaskResult> => {
-        const appFields = buildBitableFields(incoming, classification)
-        if (baseTarget.service === "ridejob" && appFields.companyName) {
-          try {
-            appFields.companyRecordId = await resolveRidejobCompanyRecordId(appFields.companyName)
-            console.log(
-              appFields.companyRecordId
-                ? `[INFO] 得意先CRM linked: ${appFields.companyName} -> ${appFields.companyRecordId}`
-                : `[INFO] 得意先CRM not found for company: ${appFields.companyName}`,
-            )
-          } catch (error) {
-            console.warn("[WARNING] 得意先CRM lookup failed", error)
+    if (!test.isTest) {
+      tasks.push(
+        (async (): Promise<TaskResult> => {
+          const appFields = buildBitableFields(incoming, classification)
+          if (baseTarget.service === "ridejob" && appFields.companyName) {
+            try {
+              appFields.companyRecordId = await resolveRidejobCompanyRecordId(appFields.companyName)
+              console.log(
+                appFields.companyRecordId
+                  ? `[INFO] 得意先CRM linked: ${appFields.companyName} -> ${appFields.companyRecordId}`
+                  : `[INFO] 得意先CRM not found for company: ${appFields.companyName}`,
+              )
+            } catch (error) {
+              console.warn("[WARNING] 得意先CRM lookup failed", error)
+            }
           }
-        }
-        const bitableInput = buildFieldsForService(baseTarget.service, appFields)
-        const result = await createBitableRecord({
-          service: baseTarget.service,
-          tableId: baseTarget.tableId,
-          fields: bitableInput,
-        }).catch((error: unknown): BitableCreateResult => ({
-          ok: false,
-          status: 0,
-          message: error instanceof Error ? error.message : "bitable error",
-        }))
-        return { name: "base_registration", ok: result.ok, base: result }
-      })(),
-    )
+          const bitableInput = buildFieldsForService(baseTarget.service, appFields)
+          const result = await createBitableRecord({
+            service: baseTarget.service,
+            tableId: baseTarget.tableId,
+            fields: bitableInput,
+          }).catch((error: unknown): BitableCreateResult => ({
+            ok: false,
+            status: 0,
+            message: error instanceof Error ? error.message : "bitable error",
+          }))
+          return { name: "base_registration", ok: result.ok, base: result }
+        })(),
+      )
+    }
 
-    // 応募者向け自動返信（非致命。email 不正時はスキップ）
-    if (isValidEmail(incoming.email)) {
+    // 応募者向け自動返信（非致命。email 不正時／テスト応募時はスキップ）
+    if (!test.isTest && isValidEmail(incoming.email)) {
       const mail = buildApplicantAutoReply(classification, {
         email: incoming.email,
         name: `${incoming.lastName ?? ""} ${incoming.firstName ?? ""}`.trim(),
@@ -286,22 +374,24 @@ export async function POST(request: Request) {
       console.log("[INFO] applicant email missing or invalid, skipping auto-reply")
     }
 
-    // 応募者向け自動SMS（非致命。電話不正/トークン未設定時はスキップ）
+    // 応募者向け自動SMS（非致命。電話不正/トークン未設定/テスト応募時はスキップ）
     const smsChannel: SmsChannel = classification.isMechanic ? "mechanic" : "ridejob"
-    tasks.push(
-      sendApplicantSms(
-        {
-          phone: incoming.phone,
-          channel: smsChannel,
-          applicantName: `${incoming.lastName ?? ""} ${incoming.firstName ?? ""}`.trim(),
-          media: incoming.utmSource || incoming.applicationSource || "meta",
-        },
-        "submit-application:applicant",
-      ).then((r) => ({ name: "applicant_sms" as const, ok: r.ok })),
-    )
+    if (!test.isTest) {
+      tasks.push(
+        sendApplicantSms(
+          {
+            phone: incoming.phone,
+            channel: smsChannel,
+            applicantName: `${incoming.lastName ?? ""} ${incoming.firstName ?? ""}`.trim(),
+            media: incoming.utmSource || incoming.applicationSource || "meta",
+          },
+          "submit-application:applicant",
+        ).then((r) => ({ name: "applicant_sms" as const, ok: r.ok })),
+      )
+    }
 
-    // Meta Conversions API（Lead）— 非致命。eventId が無ければスキップ
-    if (typeof incoming.metaEventId === "string" && incoming.metaEventId) {
+    // Meta Conversions API（Lead）— 非致命。eventId が無い／テスト応募時はスキップ
+    if (!test.isTest && typeof incoming.metaEventId === "string" && incoming.metaEventId) {
       const cookieHeader = request.headers.get("cookie") ?? ""
       const clientIp = (request.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || undefined
       tasks.push(

@@ -1,10 +1,37 @@
 import type { ApplicationFormData } from "@/features/application/types"
+import { readAttribution } from "@/features/application/lib/attribution"
 
 export type ApplyContext = {
   applicationSource: string
   jobUrl: string
+  /** 最終接触の source/medium（後方互換。従来の utmSource/utmMedium） */
   utmSource: string
   utmMedium: string
+  /** 初回接触の source/medium */
+  utmSourceFirst: string
+  utmMediumFirst: string
+  /** 最終接触キャンペーン */
+  utmCampaign: string
+  /** 最終接触の取得時刻（ISO, 空文字なら不明） */
+  utmLastTouchAt: string
+  /** 初回接触の取得時刻（ISO, 空文字なら不明） */
+  utmFirstTouchAt: string
+  fbclid: string
+  gclid: string
+}
+
+const EMPTY_APPLY_CONTEXT: ApplyContext = {
+  applicationSource: "unknown",
+  jobUrl: "",
+  utmSource: "",
+  utmMedium: "",
+  utmSourceFirst: "",
+  utmMediumFirst: "",
+  utmCampaign: "",
+  utmLastTouchAt: "",
+  utmFirstTouchAt: "",
+  fbclid: "",
+  gclid: "",
 }
 
 export function buildBirthDate(year: string, month: string, day: string): string {
@@ -37,7 +64,7 @@ export function resolveApplicationCompleteUrl(applyEmail: string | undefined | n
  */
 export function resolveApplyContext(): ApplyContext {
   if (typeof window === "undefined") {
-    return { applicationSource: "unknown", jobUrl: "", utmSource: "", utmMedium: "" }
+    return { ...EMPTY_APPLY_CONTEXT }
   }
 
   const searchParams = new URLSearchParams(window.location.search)
@@ -60,20 +87,33 @@ export function resolveApplyContext(): ApplyContext {
     window.history.replaceState(null, "", jobUrl)
   }
 
-  const cookies = document.cookie.split("; ").reduce((acc, cookie) => {
-    const [key, value] = cookie.split("=")
-    acc[key] = decodeURIComponent(value)
-    return acc
-  }, {} as Record<string, string>)
+  const attr = readAttribution()
+  const last = attr.lastTouch
+  const first = attr.firstTouch
 
-  const utmSource = cookies.utm_source || ""
-  const utmMedium = cookies.utm_medium || ""
-
-  if (utmSource || utmMedium) {
-    console.log("[UTM] Retrieved from cookies:", { utmSource, utmMedium })
+  const context: ApplyContext = {
+    applicationSource,
+    jobUrl,
+    // 後方互換: 従来の utmSource/utmMedium は last-touch を指す
+    utmSource: last?.source ?? "",
+    utmMedium: last?.medium ?? "",
+    utmSourceFirst: first?.source ?? "",
+    utmMediumFirst: first?.medium ?? "",
+    utmCampaign: last?.campaign ?? "",
+    utmLastTouchAt: last?.at ?? "",
+    utmFirstTouchAt: first?.at ?? "",
+    fbclid: attr.fbclid ?? "",
+    gclid: attr.gclid ?? "",
   }
 
-  return { applicationSource, jobUrl, utmSource, utmMedium }
+  if (context.utmSource || context.utmMedium) {
+    console.log("[UTM] Retrieved from attribution:", {
+      last: { source: context.utmSource, medium: context.utmMedium, at: context.utmLastTouchAt },
+      first: { source: context.utmSourceFirst, medium: context.utmMediumFirst, at: context.utmFirstTouchAt },
+    })
+  }
+
+  return context
 }
 
 export async function postApplication(payload: ApplicationFormData & {

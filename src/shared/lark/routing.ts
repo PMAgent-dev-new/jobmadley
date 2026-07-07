@@ -42,6 +42,72 @@ export const normalizeSource = (
   return undefined
 }
 
+// === チャネル正規化 ===
+
+/** 集計用の正規化チャネル。生の utm 値のブレ（meta/Meta/facebook 等）を吸収する。 */
+export type MarketingChannel =
+  | "paid_social"
+  | "paid_search"
+  | "organic_search"
+  | "job_board"
+  | "referral"
+  | "direct"
+  | "other"
+
+const CHANNEL_LABEL: Record<MarketingChannel, string> = {
+  paid_social: "有料SNS広告",
+  paid_search: "リスティング広告",
+  organic_search: "自然検索",
+  job_board: "求人媒体",
+  referral: "参照サイト",
+  direct: "直接/不明",
+  other: "その他",
+}
+
+const PAID_SOCIAL_SOURCES = new Set(["meta", "facebook", "fb", "ig", "instagram", "messenger", "audience_network"])
+const PAID_SOCIAL_MEDIUMS = new Set(["catalog", "paid_social", "paidsocial", "cpc_social", "social_paid"])
+const SEARCH_SOURCES = new Set(["google", "yahoo", "bing", "yahoo!", "duckduckgo"])
+const PAID_MEDIUMS = new Set(["cpc", "ppc", "paid", "paidsearch", "paid_search", "sem"])
+const JOB_BOARD_SOURCES = new Set(["standby", "kyujinbox", "indeed", "stanby"])
+
+/**
+ * utm_source / utm_medium / applicationSource からマーケティングチャネルを正規化分類する。
+ * 生値は保持したまま、集計をブレさせないための正規化ラベルを返す。
+ */
+export const classifyChannel = (
+  source: string | undefined,
+  medium: string | undefined,
+  applicationSource?: string,
+): { channel: MarketingChannel; label: string } => {
+  const s = source?.trim().toLowerCase() ?? ""
+  const m = medium?.trim().toLowerCase() ?? ""
+  const appSrc = applicationSource?.trim().toLowerCase() ?? ""
+
+  const wrap = (channel: MarketingChannel) => ({ channel, label: CHANNEL_LABEL[channel] })
+
+  // 求人媒体連携（standby / kyujinbox / indeed）は最優先
+  if (JOB_BOARD_SOURCES.has(appSrc) || JOB_BOARD_SOURCES.has(s)) return wrap("job_board")
+
+  // 有料SNS（Meta広告・カタログ/フィード広告を含む）
+  if (PAID_SOCIAL_SOURCES.has(s) || PAID_SOCIAL_MEDIUMS.has(m)) return wrap("paid_social")
+
+  // 検索エンジン: medium が有料なら paid_search、それ以外は organic_search
+  if (SEARCH_SOURCES.has(s)) return PAID_MEDIUMS.has(m) ? wrap("paid_search") : wrap("organic_search")
+
+  // 汎用 cpc/ppc（source 不明でも有料判定）
+  if (PAID_MEDIUMS.has(m)) return wrap("paid_search")
+
+  if (m === "referral" || (s && !SEARCH_SOURCES.has(s) && m === "")) {
+    // referral 明示、または source があるが medium 不明 → 参照扱い
+    if (m === "referral") return wrap("referral")
+  }
+
+  // UTM も applicationSource も無ければ直接/不明
+  if (!s && !m && (!appSrc || appSrc === "unknown")) return wrap("direct")
+
+  return wrap("other")
+}
+
 // === Base 登録（bitable API）— 内部フォーム/求人ボックス共通 ===
 
 /** 求人分類から Base 登録先サービスを決定 (CP One > 整備士 > デフォルト) */

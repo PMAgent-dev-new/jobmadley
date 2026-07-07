@@ -192,7 +192,7 @@ export default function HubPage({
           {totalPages > 1 && pageHref && (
             <nav aria-label="ページ送り" className="mt-8 flex flex-wrap items-center justify-center gap-2">
               {page > 1 && (
-                <Link href={pageHref(page - 1)} className="px-3 py-1.5 rounded border border-gray-300 text-sm text-gray-700 hover:border-primary hover:text-primary">
+                <Link href={pageHref(page - 1)} className="inline-flex items-center min-h-[44px] px-3 py-1.5 rounded border border-gray-300 text-sm text-gray-700 hover:border-primary hover:text-primary">
                   前へ
                 </Link>
               )}
@@ -200,14 +200,14 @@ export default function HubPage({
                 <span key={n} className="flex items-center gap-2">
                   {idx > 0 && n - arr[idx - 1] > 1 && <span className="text-gray-400">…</span>}
                   {n === page ? (
-                    <span aria-current="page" className="px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm font-bold">{n}</span>
+                    <span aria-current="page" className="inline-flex items-center min-h-[44px] px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm font-bold">{n}</span>
                   ) : (
-                    <Link href={pageHref(n)} className="px-3 py-1.5 rounded border border-gray-300 text-sm text-gray-700 hover:border-primary hover:text-primary">{n}</Link>
+                    <Link href={pageHref(n)} className="inline-flex items-center min-h-[44px] px-3 py-1.5 rounded border border-gray-300 text-sm text-gray-700 hover:border-primary hover:text-primary">{n}</Link>
                   )}
                 </span>
               ))}
               {page < totalPages && (
-                <Link href={pageHref(page + 1)} className="px-3 py-1.5 rounded border border-gray-300 text-sm text-gray-700 hover:border-primary hover:text-primary">
+                <Link href={pageHref(page + 1)} className="inline-flex items-center min-h-[44px] px-3 py-1.5 rounded border border-gray-300 text-sm text-gray-700 hover:border-primary hover:text-primary">
                   次へ
                 </Link>
               )}
@@ -250,7 +250,7 @@ export default function HubPage({
                     <li key={l.href}>
                       <Link
                         href={l.href}
-                        className="inline-block px-3 py-1.5 rounded-full border border-gray-300 text-sm text-gray-700 hover:border-primary hover:text-primary transition-colors"
+                        className="inline-flex items-center min-h-[40px] px-3 py-1.5 rounded-full border border-gray-300 text-sm text-gray-700 hover:border-primary hover:text-primary transition-colors"
                       >
                         {l.label}
                       </Link>

@@ -67,7 +67,8 @@ export default function JobBreadcrumb({ job }: JobBreadcrumbProps) {
           </>
         )}
         <ChevronRight className="w-4 h-4 mx-1 shrink-0" />
-        <span className="flex-1 min-w-0 whitespace-normal break-words">{lastCrumbText}</span>
+        {/* モバイルでは basis-full で必ず独立行・全幅に折り返す（flex-1 だと残り数pxに押し潰されCJKが1文字ずつ縦積みになる）。sm 以上は従来通り横並びで伸長。 */}
+        <span className="min-w-0 basis-full sm:basis-auto sm:flex-1 whitespace-normal break-words text-gray-800">{lastCrumbText}</span>
       </div>
     </nav>
   )
