@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { sendToLark } from "@/shared/lark/client"
 import {
+  classifyChannel,
   detectCpOne,
   detectMechanic,
   detectPmAgent,
@@ -69,6 +70,13 @@ const buildInternalLarkCard = (
   const utmLines: string[] = []
   if (input.utmSource) utmLines.push(`流入元: ${input.utmSource}`)
   if (input.utmMedium) utmLines.push(`メディア: ${input.utmMedium}`)
+  // 生値のブレを吸収した正規化チャネルを併記（direct/不明は省略）
+  const { channel, label: channelLabel } = classifyChannel(
+    input.utmSource,
+    input.utmMedium,
+    input.applicationSource,
+  )
+  if (channel !== "direct") utmLines.push(`チャネル: ${channelLabel}`)
 
   let titleEmoji = "🟦"
   let titleText = "ライドジョブ求人サイトから応募がありました！"
@@ -136,6 +144,8 @@ const buildBaseRegistrationPayload = (input: ApplicationPayload, c: ClassifiedAp
     applicationSource: input.applicationSource ?? "",
     utmSource: input.utmSource ?? "",
     utmMedium: input.utmMedium ?? "",
+    // 正規化チャネル（生値は上記のまま保持。集計はこの列でブレなく行える）
+    channel: classifyChannel(input.utmSource, input.utmMedium, input.applicationSource).channel,
     appliedAt,
   }
   if (c.isMechanic) payload.isStandby = c.isStandby
