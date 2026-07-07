@@ -12,6 +12,7 @@ import { sendMail } from "@/shared/mail/gmail"
 import { buildApplicantAutoReply, isValidEmail } from "@/shared/mail/applicantAutoReply"
 import { sendApplicantSms, type SmsChannel } from "@/shared/sms/applicantSms"
 import { sendMetaCapiLead } from "@/shared/meta/capi"
+import { detectTestApplication, type TestDetection } from "@/shared/application/testDetection"
 
 interface ApplicationPayload {
   lastName?: string
@@ -41,7 +42,11 @@ interface ClassifiedApplication {
   isKyujinbox: boolean
 }
 
-const buildInternalLarkCard = (input: ApplicationPayload, c: ClassifiedApplication) => {
+const buildInternalLarkCard = (
+  input: ApplicationPayload,
+  c: ClassifiedApplication,
+  test?: TestDetection,
+) => {
   const appliedAt = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })
 
   const details = [
@@ -82,6 +87,12 @@ const buildInternalLarkCard = (input: ApplicationPayload, c: ClassifiedApplicati
   } else if (c.isKyujinbox) {
     titleEmoji = "🟨"
     titleText = "求人ボックスからの応募がありました！"
+  }
+
+  // テスト応募は先頭に [TEST] を付与し、実応募と一目で区別できるようにする
+  if (test?.isTest) {
+    titleEmoji = "🧪"
+    titleText = `[TEST] ${titleText}（テスト判定: ${test.reason ?? "—"} / Base登録・自動連絡はスキップ）`
   }
 
   return {
@@ -204,6 +215,12 @@ export async function POST(request: Request) {
       isKyujinbox: source === "kyujinbox",
     }
 
+    // テスト応募判定（実績を汚染しないよう Base登録・自動連絡・CAPI をスキップする）
+    const test = detectTestApplication(incoming)
+    if (test.isTest) {
+      console.log(`[INFO] Test application detected (${test.reason}). Notification only; skipping base/mail/sms/capi.`)
+    }
+
     // 通知Webhook選択
     const notification = resolveSubmitNotificationWebhook(classification)
     if (!notification.url) {
@@ -212,8 +229,10 @@ export async function POST(request: Request) {
     }
     console.log(`[INFO] Using ${notification.type} for notification`)
 
-    // Base登録Webhook選択（任意）
-    const base = resolveSubmitBaseWebhook(classification)
+    // Base登録Webhook選択（任意）。テスト応募は登録しない。
+    const base = test.isTest
+      ? { url: undefined, type: "SKIPPED_TEST" }
+      : resolveSubmitBaseWebhook(classification)
     if (base.url) {
       console.log(`[INFO] Using ${base.type} for base registration`)
     } else {
@@ -227,7 +246,7 @@ export async function POST(request: Request) {
     }>[] = []
 
     tasks.push(
-      sendToLark(notification.url, buildInternalLarkCard(incoming, classification), "submit-application:notification").then(
+      sendToLark(notification.url, buildInternalLarkCard(incoming, classification, test), "submit-application:notification").then(
         (r) => ({ name: "notification", ok: r.ok }),
       ),
     )
@@ -239,8 +258,8 @@ export async function POST(request: Request) {
       )
     }
 
-    // 応募者向け自動返信（非致命。email 不正時はスキップ）
-    if (isValidEmail(incoming.email)) {
+    // 応募者向け自動返信（非致命。email 不正時／テスト応募時はスキップ）
+    if (!test.isTest && isValidEmail(incoming.email)) {
       const mail = buildApplicantAutoReply(classification, {
         email: incoming.email,
         name: `${incoming.lastName ?? ""} ${incoming.firstName ?? ""}`.trim(),
@@ -254,22 +273,24 @@ export async function POST(request: Request) {
       console.log("[INFO] applicant email missing or invalid, skipping auto-reply")
     }
 
-    // 応募者向け自動SMS（非致命。電話不正/トークン未設定時はスキップ）
+    // 応募者向け自動SMS（非致命。電話不正/トークン未設定/テスト応募時はスキップ）
     const smsChannel: SmsChannel = classification.isMechanic ? "mechanic" : "ridejob"
-    tasks.push(
-      sendApplicantSms(
-        {
-          phone: incoming.phone,
-          channel: smsChannel,
-          applicantName: `${incoming.lastName ?? ""} ${incoming.firstName ?? ""}`.trim(),
-          media: incoming.utmSource || incoming.applicationSource || "meta",
-        },
-        "submit-application:applicant",
-      ).then((r) => ({ name: "applicant_sms" as const, ok: r.ok })),
-    )
+    if (!test.isTest) {
+      tasks.push(
+        sendApplicantSms(
+          {
+            phone: incoming.phone,
+            channel: smsChannel,
+            applicantName: `${incoming.lastName ?? ""} ${incoming.firstName ?? ""}`.trim(),
+            media: incoming.utmSource || incoming.applicationSource || "meta",
+          },
+          "submit-application:applicant",
+        ).then((r) => ({ name: "applicant_sms" as const, ok: r.ok })),
+      )
+    }
 
-    // Meta Conversions API（Lead）— 非致命。eventId が無ければスキップ
-    if (typeof incoming.metaEventId === "string" && incoming.metaEventId) {
+    // Meta Conversions API（Lead）— 非致命。eventId が無い／テスト応募時はスキップ
+    if (!test.isTest && typeof incoming.metaEventId === "string" && incoming.metaEventId) {
       const cookieHeader = request.headers.get("cookie") ?? ""
       const clientIp = (request.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || undefined
       tasks.push(
