@@ -26,25 +26,68 @@ export const microcmsMediaEnv = () => ({
   apiKey: requireEnv("MICROCMS_API_KEY_2"),
 })
 
-// Lark Webhook（任意。未設定時はAPI Routeで個別判定）
+// Lark Webhook（通知用のみ。Base登録は bitable API に移行）
 export const larkEnv = {
-  // 内部応募フォーム用
+  // 通知 Webhook（内部応募フォーム用）
   notification: () => read("LARK_WEBHOOK"),
   notificationCpOne: () => read("LARK_WEBHOOK_CPONE"),
   notificationMechanic: () => read("LARK_WEBHOOK_MECHANIC"),
-  // 求人ボックス連携用（外部からの応募）
+  // 通知 Webhook（求人ボックス連携用）
   notificationCpOneKyujinbox: () => read("LARK_WEBHOOK_CPONE_KYUZINBOX"),
-  // Base登録用
-  base: () => read("LARK_WEBHOOK_BASE"),
-  baseLegacy: () => read("LARK_BASE_WEBHOOK"),
-  baseCpOne: () => read("LARK_WEBHOOK_BASE_CPONE"),
-  baseCpOneStandby: () => read("LARK_WEBHOOK_BASE_CPONE_STANDBY"),
-  baseCpOneKyujinbox: () => read("LARK_WEBHOOK_BASE_CPONE_KYUZINBOX"),
-  baseMechanic: () => read("LARK_WEBHOOK_BASE_MECHANIC"),
-  baseMechanicStandby: () => read("LARK_WEBHOOK_BASE_MECHANIC_STANDBY"),
-  baseMechanicKyujin: () => read("LARK_WEBHOOK_BASE_MECHANIC_KYUJIN"),
   // お問い合わせフォーム用（必須化：従来はハードコードフォールバックがあったが廃止）
   contact: () => requireEnv("LARK_CONTACT_WEBHOOK"),
+  // エラー検知用（Base 登録失敗などをこの Webhook に通知）
+  errorAlert: () => read("LARK_WEBHOOK_ERROR_ALERT"),
+}
+
+// Lark Open API 用の認証情報（サービス別）
+// 各サービスごとに別 App / 別 Base を使用するため、サービス単位で資格情報を持つ。
+export type LarkServiceId = "ridejob" | "mechanic" | "liftjob"
+
+export interface LarkServiceCredentials {
+  appId: string
+  appSecret: string
+  appToken: string
+  domain: string
+}
+
+const DEFAULT_LARK_DOMAIN = "open.larksuite.com"
+
+// LARK_DOMAIN_* は `open.larksuite.com` 形式（スキームなし）で使う。
+// クライアントが `https://${domain}` を組み立てるため、`https://` 付きや末尾スラッシュを許容して剥がす。
+const normalizeLarkDomain = (raw: string): string =>
+  raw.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "")
+
+const readServiceCredentials = (
+  service: LarkServiceId,
+  suffix: "RIDEJOB" | "MECHANIC" | "LIFTJOB",
+  fallback?: { appId?: string; appSecret?: string; appToken?: string; domain?: string },
+): LarkServiceCredentials => {
+  const appId = read(`APP_ID_${suffix}`) ?? fallback?.appId
+  const appSecret = read(`APP_SECRET_${suffix}`) ?? fallback?.appSecret
+  const appToken = read(`APP_TOKEN_${suffix}`) ?? fallback?.appToken
+  const domain = normalizeLarkDomain(read(`LARK_DOMAIN_${suffix}`) ?? fallback?.domain ?? DEFAULT_LARK_DOMAIN)
+  if (!appId || !appSecret || !appToken) {
+    throw new Error(`Lark service "${service}" の認証情報 (APP_ID_${suffix} / APP_SECRET_${suffix} / APP_TOKEN_${suffix}) が未設定です`)
+  }
+  return { appId, appSecret, appToken, domain }
+}
+
+export const larkServiceCredentials = (service: LarkServiceId): LarkServiceCredentials => {
+  const fallback = {
+    appId: read("LARK_APP_ID"),
+    appSecret: read("LARK_APP_SECRET"),
+    appToken: read("LARK_BASE_APP_TOKEN"),
+    domain: read("LARK_DOMAIN"),
+  }
+  switch (service) {
+    case "ridejob":
+      return readServiceCredentials(service, "RIDEJOB", fallback)
+    case "mechanic":
+      return readServiceCredentials(service, "MECHANIC")
+    case "liftjob":
+      return readServiceCredentials(service, "LIFTJOB")
+  }
 }
 
 // Gmail API（応募者向け自動返信。サービスアカウント + ドメインワイド委任）

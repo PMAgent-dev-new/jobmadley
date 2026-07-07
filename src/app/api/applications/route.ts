@@ -9,9 +9,16 @@ import {
   detectCpOne,
   detectMechanic,
   detectPmAgent,
-  resolveKyujinboxBaseWebhook,
+  resolveBaseTarget,
   resolveKyujinboxNotificationWebhook,
 } from "@/shared/lark/routing"
+import { createBitableRecord, type BitableCreateResult } from "@/shared/lark/bitable"
+import {
+  buildFieldsForService,
+  resolveRidejobCompanyRecordId,
+  type ApplicationFields,
+} from "@/shared/lark/bitable-schema"
+import { notifyBaseRegistrationError } from "@/shared/lark/alert"
 import { sendMail } from "@/shared/mail/gmail"
 import { buildApplicantAutoReply, isValidEmail } from "@/shared/mail/applicantAutoReply"
 import { sendApplicantSms, type SmsChannel } from "@/shared/sms/applicantSms"
@@ -182,37 +189,38 @@ const formatErrorLarkMessage = (title: string, description: string, details?: un
   return { msg_type: "interactive", card: { elements } }
 }
 
-const buildLarkBasePayloadFromNormalized = (
+const buildBitableFieldsFromNormalized = (
   normalized: NormalizedApplication,
   rawBody: { analytics?: { userAgent?: string; referrer?: string; ip?: string; ipAddress?: string } },
-) => {
+): ApplicationFields => {
   const { applicant, job } = normalized
-  const fullName = `${applicant.lastName || ""} ${applicant.firstName || ""}`.trim()
-  const fullNameKana = `${applicant.lastNameKana || ""} ${applicant.firstNameKana || ""}`.trim()
-  const appliedIso = new Date(normalized.appliedOnMillis || Date.now()).toISOString()
   const qa = (normalized.questionsAndAnswers || []).map((q) => ({ question: q.question, answer: q.answer }))
+  const extraNotes: string[] = ["流入チャネル: 求人ボックス"]
+  if (normalized.id) extraNotes.push(`応募ID: ${normalized.id}`)
+  if (applicant.gender) extraNotes.push(`性別: ${applicant.gender}`)
+  if (applicant.occupation) extraNotes.push(`職業: ${applicant.occupation}`)
+  if (applicant.prefecture || applicant.city) {
+    extraNotes.push(`住所: ${[applicant.prefecture, applicant.city].filter(Boolean).join(" ")}`)
+  }
+  if (qa.length > 0) extraNotes.push(`質問回答: ${JSON.stringify(qa)}`)
+  if (rawBody?.analytics?.referrer) extraNotes.push(`リファラ: ${rawBody.analytics.referrer}`)
 
   return {
-    応募ID: normalized.id || "",
-    応募日時: appliedIso,
-    求人ID: job.id || "",
-    求人タイトル: job.title || "",
-    求人URL: job.url || "",
-    会社名: job.companyName || "",
-    勤務地: job.location || "",
-    氏名: fullName || "",
-    氏名カナ: fullNameKana || "",
-    メール: applicant.email || "",
-    電話番号: applicant.phone || "",
-    生年月日: applicant.birthday || "",
-    性別: typeof applicant.gender === "string" ? applicant.gender : "",
-    職業: applicant.occupation || "",
-    都道府県: applicant.prefecture || "",
-    市区町村: applicant.city || "",
-    質問回答: JSON.stringify(qa),
-    UA: rawBody?.analytics?.userAgent || "",
-    リファラ: rawBody?.analytics?.referrer || "",
-    IP: rawBody?.analytics?.ip || rawBody?.analytics?.ipAddress || "",
+    lastName: applicant.lastName,
+    firstName: applicant.firstName,
+    lastNameKana: applicant.lastNameKana,
+    firstNameKana: applicant.firstNameKana,
+    birthDate: applicant.birthday,
+    phone: applicant.phone,
+    email: applicant.email,
+    jobId: job.id,
+    jobName: job.title,
+    jobUrl: job.url,
+    companyName: job.companyName,
+    jobLocation: job.location,
+    applicationSource: "kyujinbox",
+    appliedAtMillis: normalized.appliedOnMillis ?? Date.now(),
+    extraNotes,
   }
 }
 
@@ -410,15 +418,55 @@ export async function POST(request: Request) {
       console.warn("[applications] Applicant SMS failed, but proceeding")
     }
 
-    // Base登録（任意）
-    const baseWebhookUrl = resolveKyujinboxBaseWebhook({ isCpOne, isMechanic })
-    if (!baseWebhookUrl) {
-      return NextResponse.json({ success: true, base: { sent: false, reason: "Base webhook not configured" } })
+    // Base登録 (bitable API)
+    const baseTarget = resolveBaseTarget({ isCpOne, isMechanic })
+    const bitableFields = buildBitableFieldsFromNormalized(normalized, body)
+    if (baseTarget.service === "ridejob" && bitableFields.companyName) {
+      try {
+        bitableFields.companyRecordId = await resolveRidejobCompanyRecordId(bitableFields.companyName)
+        console.log(
+          bitableFields.companyRecordId
+            ? `[applications] 得意先CRM linked: ${bitableFields.companyName} -> ${bitableFields.companyRecordId}`
+            : `[applications] 得意先CRM not found for company: ${bitableFields.companyName}`,
+        )
+      } catch (error) {
+        console.warn("[applications] 得意先CRM lookup failed", error)
+      }
     }
-    const basePayload = buildLarkBasePayloadFromNormalized(normalized, body)
-    await appendDevLog("Lark Base Payload", JSON.stringify(basePayload, null, 2))
-    const baseResult = await sendToLark(baseWebhookUrl, basePayload, "applications:base")
+    const bitableInput = buildFieldsForService(baseTarget.service, bitableFields)
+    await appendDevLog("Lark Bitable Payload", {
+      service: baseTarget.service,
+      tableId: baseTarget.tableId,
+      fields: bitableInput,
+    })
+    const baseResult = await createBitableRecord({
+      service: baseTarget.service,
+      tableId: baseTarget.tableId,
+      fields: bitableInput,
+    }).catch((error: unknown): BitableCreateResult => ({
+      ok: false,
+      status: 0,
+      message: error instanceof Error ? error.message : "bitable error",
+    }))
     if (!baseResult.ok) {
+      await notifyBaseRegistrationError({
+        route: "applications",
+        service: baseTarget.service,
+        tableId: baseTarget.tableId,
+        status: baseResult.status,
+        code: baseResult.code,
+        message: baseResult.message,
+        applicant: {
+          name: `${normalized.applicant.lastName || ""} ${normalized.applicant.firstName || ""}`.trim() || undefined,
+          phone: normalized.applicant.phone,
+          email: normalized.applicant.email,
+        },
+        job: {
+          id: normalized.job.id,
+          name: normalized.job.title,
+          url: normalized.job.url,
+        },
+      }).catch((error) => console.error("[alert] notifyBaseRegistrationError failed", error))
       return NextResponse.json({
         success: true,
         base: { sent: false, status: baseResult.status, code: baseResult.code, msg: baseResult.message },
@@ -426,7 +474,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({
       success: true,
-      base: { sent: true, status: baseResult.status, code: baseResult.code ?? 0 },
+      base: { sent: true, status: baseResult.status, code: baseResult.code ?? 0, recordId: baseResult.recordId },
     })
   } catch (error) {
     console.error("[applications] Error processing application:", error)
