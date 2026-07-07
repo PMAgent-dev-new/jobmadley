@@ -97,6 +97,16 @@ const dropEmpty = (fields: Record<string, unknown>): Record<string, unknown> => 
   return out
 }
 
+/**
+ * Lark の URL(ハイパーリンク)型フィールド用に文字列を {link, text} に変換する。
+ * URL型フィールドは文字列を直接受け付けず、渡すと URLFieldConvFail でレコード作成全体が失敗する。
+ * 空文字/未指定なら undefined（dropEmpty で除外）。
+ */
+const urlField = (url: string | undefined): { link: string; text: string } | undefined => {
+  const u = url?.trim()
+  return u ? { link: u, text: u } : undefined
+}
+
 // === サービス別マッピング ===
 
 const buildRidejobFields = (input: ApplicationFields): Record<string, unknown> => {
@@ -133,7 +143,7 @@ const buildMechanicFields = (input: ApplicationFields): Record<string, unknown> 
     メールアドレス: input.email,
     求人情報: input.jobName,
     媒体応募先企業名: input.companyName,
-    Indeed応募者URL: input.jobUrl,
+    Indeed応募者URL: urlField(input.jobUrl),
     応募日: input.appliedAtMillis,
     対応履歴メモ: buildNotes(input, [
       "jobId",
