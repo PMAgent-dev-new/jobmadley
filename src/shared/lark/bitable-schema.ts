@@ -148,14 +148,14 @@ const buildMechanicFields = (input: ApplicationFields): Record<string, unknown> 
     求人情報: input.jobName,
     媒体応募先企業名: input.companyName,
     Indeed応募者URL: urlField(input.jobUrl),
+    utm_source: input.utmSource,
+    utm_medium: input.utmMedium,
     utm_campaign: input.utmCampaign,
     応募日: input.appliedAtMillis,
     対応履歴メモ: buildNotes(input, [
       "jobId",
       "jobLocation",
       "applicationSource",
-      "utmSource",
-      "utmMedium",
     ]),
   })
 
