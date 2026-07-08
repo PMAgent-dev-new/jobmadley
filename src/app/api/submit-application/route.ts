@@ -189,7 +189,6 @@ const buildBitableFields = (input: ApplicationPayload, c: ClassifiedApplication)
   // 生の utmSource/utmMedium は下記フィールドで保持しつつ、集計用の正規化チャネルを併記する。
   const { label: channelLabel } = classifyChannel(input.utmSource, input.utmMedium, input.applicationSource)
   extraNotes.push(`チャネル: ${channelLabel}`)
-  if (input.utmCampaign) extraNotes.push(`キャンペーン: ${input.utmCampaign}`)
   const firstTouch = [input.utmSourceFirst, input.utmMediumFirst].filter(Boolean).join(" / ")
   if (firstTouch) extraNotes.push(`初回接触: ${firstTouch}`)
   if (input.utmLastTouchAt) extraNotes.push(`最終接触日時: ${input.utmLastTouchAt}`)
@@ -210,6 +209,7 @@ const buildBitableFields = (input: ApplicationPayload, c: ClassifiedApplication)
     applicationSource: input.applicationSource,
     utmSource: input.utmSource,
     utmMedium: input.utmMedium,
+    utmCampaign: input.utmCampaign,
     appliedAtMillis: Date.now(),
     extraNotes,
   }

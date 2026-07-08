@@ -22,6 +22,7 @@ export interface ApplicationFields {
   applicationSource?: string
   utmSource?: string
   utmMedium?: string
+  utmCampaign?: string
   appliedAtMillis?: number
   extraNotes?: string[]
 }
@@ -85,6 +86,7 @@ const NOTE_LABELS: Partial<Record<keyof ApplicationFields, string>> = {
   applicationSource: "応募経由",
   utmSource: "UTM source",
   utmMedium: "UTM medium",
+  utmCampaign: "キャンペーン",
 }
 
 const dropEmpty = (fields: Record<string, unknown>): Record<string, unknown> => {
@@ -112,14 +114,12 @@ const urlField = (url: string | undefined): { link: string; text: string } | und
 const buildRidejobFields = (input: ApplicationFields): Record<string, unknown> => {
   // companyRecordId が解決済みなら SingleLink、未解決なら 対応履歴メモ で会社名を補足
   const linked = !!input.companyRecordId
+  // 専用列がある項目（勤務地 / utm_source / utm_medium / utm_campaign）は列へ。残りは対応履歴メモへ。
   const noteKeys: Array<keyof ApplicationFields> = [
     "jobId",
     "jobUrl",
     ...(linked ? [] : (["companyName"] as Array<keyof ApplicationFields>)),
-    "jobLocation",
     "applicationSource",
-    "utmSource",
-    "utmMedium",
   ]
   return dropEmpty({
     求職者名: joinName(input.lastName, input.firstName),
@@ -129,6 +129,10 @@ const buildRidejobFields = (input: ApplicationFields): Record<string, unknown> =
     メールアドレス: input.email,
     求人名: input.jobName,
     媒体応募先企業名: linked ? [input.companyRecordId] : undefined,
+    勤務地: input.jobLocation,
+    utm_source: input.utmSource,
+    utm_medium: input.utmMedium,
+    utm_campaign: input.utmCampaign,
     応募日: input.appliedAtMillis,
     対応履歴メモ: buildNotes(input, noteKeys),
   })
@@ -144,6 +148,7 @@ const buildMechanicFields = (input: ApplicationFields): Record<string, unknown> 
     求人情報: input.jobName,
     媒体応募先企業名: input.companyName,
     Indeed応募者URL: urlField(input.jobUrl),
+    utm_campaign: input.utmCampaign,
     応募日: input.appliedAtMillis,
     対応履歴メモ: buildNotes(input, [
       "jobId",
@@ -171,6 +176,7 @@ const buildLiftjobFields = (input: ApplicationFields): Record<string, unknown> =
       "applicationSource",
       "utmSource",
       "utmMedium",
+      "utmCampaign",
     ]),
   })
 
