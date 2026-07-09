@@ -220,7 +220,9 @@ const buildLiftjobFields = (input: ApplicationFields): Record<string, unknown> =
     utm_medium: input.utmMedium,
     utm_campaign: input.utmCampaign,
     応募日: input.appliedAtMillis,
-    対応履歴メモ: buildNotes(input, ["jobId", "companyName", "jobLocation"], true),
+    // 求人ID / 勤務地 / 流入チャネル / チャネル / 初回接触 / 最終接触日時 / fbclid / gclid は載せない。
+    // 会社名は専用列が無いためメモに残す。求人ボックス経由の応募者詳細（extraNotes）も残す。
+    対応履歴メモ: buildNotes(input, ["companyName"]),
   })
 
 export const buildFieldsForService = (
