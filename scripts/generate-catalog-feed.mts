@@ -19,6 +19,10 @@
 import { createClient } from 'microcms-js-sdk'
 import { put } from '@vercel/blob'
 import { readFileSync } from 'node:fs'
+import {
+  canonicalImageSource,
+  prepareCatalogImages,
+} from './lib/catalog-images.mts'
 
 // 市区町村→[緯度, 経度]（国土地理院ジオコーディングで事前生成した静的データ）。
 // Meta の住所検証は「有効な緯度経度 または 国+市町村」を要求するため、
@@ -28,12 +32,13 @@ const CITY_GEO: Record<string, [number, number]> = JSON.parse(
   readFileSync(new URL('./data/catalog-city-geo.json', import.meta.url), 'utf-8'),
 )
 
-const SERVICE_DOMAIN = process.env.NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN
+const SERVICE_DOMAIN = process.env.NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN || process.env.MICROCMS_SERVICE_DOMAIN
 const API_KEY = process.env.MICROCMS_API_KEY
 const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN
+const FORCE_REGENERATE_IMAGES = process.env.CATALOG_IMAGE_FORCE_REGENERATE === 'true'
 
 if (!SERVICE_DOMAIN || !API_KEY) {
-  throw new Error('NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN と MICROCMS_API_KEY が必要です')
+  throw new Error('NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN（またはMICROCMS_SERVICE_DOMAIN）とMICROCMS_API_KEYが必要です')
 }
 
 const client = createClient({ serviceDomain: SERVICE_DOMAIN, apiKey: API_KEY })
@@ -281,11 +286,16 @@ function buildDescriptionText(job: Job, region: string, locality: string): strin
   return parts.join('\n\n')
 }
 
-// ===== 画像（og:image 相当。1:1 白余白変換） =====
-function imageLink(job: Job): string {
+// ===== 画像（og:image 相当） =====
+function imageSource(job: Job): string {
   const u = job.images?.[0]?.url || job.imageUrl || ''
   if (!u || /\/OGP\.png|default|placeholder/i.test(u)) return ''
-  return u.split('?')[0] + '?fm=jpg&w=1080&h=1080&fit=fill&fill=solid&fill-color=FFFFFF&q=80'
+  return canonicalImageSource(u)
+}
+
+// Blob未設定のローカル実行だけで使う縮退URL。本番Actionでは必ず再レンダリング済みBlobを使う。
+function legacyImageLink(source: string): string {
+  return source + '?fm=jpg&w=1080&h=1080&fit=fill&fill=solid&fill-color=FFFFFF&q=80'
 }
 
 // ===== フィード列 =====
@@ -312,12 +322,13 @@ async function fetchAllJobs(): Promise<Job[]> {
 }
 
 // ===== 1求人 → 1行（対象外は null で除外） =====
-function toRow(job: Job): Record<string, string> | null {
+function toRow(job: Job, generatedImages: Map<string, string>): Record<string, string> | null {
   const titleRaw = job.jobName ?? job.title ?? ''
   const cat = classify(titleRaw, job.descriptionWork ?? '')
   if (cat === 'other') return null // ドライバー系以外は広告対象外
 
-  const img = imageLink(job)
+  const source = imageSource(job)
+  const img = generatedImages.get(source) || (!BLOB_TOKEN ? legacyImageLink(source) : '')
   if (!img) return null // 画像なしは配信不可
 
   const parsed = parseAddressPrefMuni(job.addressPrefMuni)
@@ -407,7 +418,22 @@ function toReviewTSV(rows: Record<string, string>[]): string {
 // ===== main =====
 async function main() {
   const jobs = await fetchAllJobs()
-  const rows = jobs.map(toRow).filter((r): r is Record<string, string> => r !== null)
+  const targetJobs = jobs.filter((job) => {
+    const title = job.jobName ?? job.title ?? ''
+    return classify(title, job.descriptionWork ?? '') !== 'other' && imageSource(job)
+  })
+  const generatedImages = BLOB_TOKEN
+    ? await prepareCatalogImages(targetJobs.map(imageSource), {
+        token: BLOB_TOKEN,
+        force: FORCE_REGENERATE_IMAGES,
+        concurrency: 4,
+      })
+    : new Map<string, string>()
+  if (!BLOB_TOKEN) {
+    console.warn('[catalog-image] BLOB_READ_WRITE_TOKEN未設定のため、ローカル実行は従来のCDN変換URLを使用します')
+  }
+
+  const rows = jobs.map((job) => toRow(job, generatedImages)).filter((r): r is Record<string, string> => r !== null)
   const tsv = toTSV(rows)
   const reviewTsv = toReviewTSV(rows)
   const excluded = jobs.length - rows.length

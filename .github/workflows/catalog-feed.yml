@@ -11,7 +11,13 @@ name: catalog-feed
 on:
   schedule:
     - cron: '0 */6 * * *' # 6時間ごと（UTC）
-  workflow_dispatch: {} # 手動実行も可
+  workflow_dispatch:
+    inputs:
+      force_regenerate_images:
+        description: 既存キャッシュを無視して全カタログ画像を再生成する
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: catalog-feed
@@ -34,9 +40,13 @@ jobs:
 
       - run: npm ci
 
+      - name: Test catalog image renderer
+        run: npm run test:catalog-images
+
       - name: Generate & publish catalog feed
         run: npm run generate:catalog-feed
         env:
           NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN: ${{ secrets.NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN }}
           MICROCMS_API_KEY: ${{ secrets.MICROCMS_API_KEY }}
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          CATALOG_IMAGE_FORCE_REGENERATE: ${{ inputs.force_regenerate_images || 'false' }}
