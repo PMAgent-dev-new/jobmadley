@@ -21,7 +21,14 @@ const RULES: Rule[] = [
 
 export function sanitizeCatalogText(text: string): { clean: string; flags: string[] } {
   const flags: string[] = []
-  let sentences = String(text || '').split(/(?<=[。\n！？])|(?=・)/)
+  const prefiltered = String(text || '').replace(
+    /^.*(?:女性|男性)[・、][^\n]*(?:中高年|シニア|[～〜~]\s*[0-9０-９]{1,3}\s*歳)[^\n]*$/gm,
+    (line) => {
+      flags.push('[DROP] ' + line.trim().slice(0, 40))
+      return ''
+    },
+  )
+  let sentences = prefiltered.split(/(?<=[。\n！？])|(?=・)/)
   sentences = sentences.filter((sentence) => {
     for (const rule of RULES) {
       if (rule.action !== 'drop') continue
@@ -74,10 +81,14 @@ export function catalogHtmlToText(html: string): string {
     .replace(/0120[-－\s]?\d{2,3}[-－\s]?\d{3,4}/g, '')
     .replace(/0\d{1,4}[-－(（\s]?\d{1,4}[-－)）\s]?\d{3,4}/g, '')
     // 元求人に含まれる装飾罫線と、電話番号除去後に残る空の問い合わせ欄を落とす。
-    .replace(/^[ \t]*(?:[=＝]{4,}|\/{4,}|(?:[:：]\s*[.｡]\s*){2,}|(?:[.｡]\s*){5,})[ \t]*$/gm, '')
+    .replace(/^.*\/{4,}.*$/gm, '')
+    .replace(/^[ \t]*(?:[=＝]{4,}|[:：.｡]{6,}|[-－ー━─]{5,})[ \t]*$/gm, '')
     .replace(/^[ \t]*(?:ご連絡先|対応曜日|対応時間|電話番号)[ \t]*[:：]?[ \t]*$/gm, '')
+    .replace(/^.*お電話でのご応募.*$/gm, '')
+    .replace(/^.*担当へ繋がりましたら.*$/gm, '')
+    .replace(/^[ \t]*(?:対応曜日|対応時間)[ \t]*[:：].*$/gm, '')
+    .replace(/^.*ご連絡お待ちしております.*$/gm, '')
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 }
-

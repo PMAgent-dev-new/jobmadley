@@ -11,12 +11,14 @@ test('sanitizeCatalogText removes age limits used as application conditions', ()
     '・62歳以下（定年65歳のため）',
     '普通免許をお持ちの方（60歳位迄）',
     '62歳までに入社された方は再雇用制度を利用できます。',
+    '・女性・中高年（～64歳）・シニアもOKです！',
     '安全運転を大切にできる方',
   ].join('\n')
   const result = sanitizeCatalogText(source)
   assert.equal(result.clean.includes('62歳以下'), false)
   assert.equal(result.clean.includes('60歳位迄'), false)
   assert.equal(result.clean.includes('62歳までに入社'), false)
+  assert.equal(result.clean.includes('女性・中高年'), false)
   assert.equal(result.clean.includes('安全運転'), true)
 })
 
@@ -32,8 +34,11 @@ test('catalogHtmlToText removes decorative rules and empty contact labels', () =
     '<p>仕事内容です。</p>',
     '<p>＝＝＝＝＝＝＝＝</p>',
     '<p>////////////////////</p>',
+    '<p>////////////////////お問合せ////////////////////</p>',
+    '<p>:.｡. .｡.::.｡. .｡.::.｡. .｡.:</p>',
     '<p>ご連絡先：</p>',
-    '<p>対応時間：</p>',
+    '<p>対応時間：10:00～18:00</p>',
+    '<p>お電話でのご応募を受け付けています。</p>',
     '<p>待遇も充実しています。</p>',
   ].join('')
   const result = catalogHtmlToText(source)
@@ -41,6 +46,6 @@ test('catalogHtmlToText removes decorative rules and empty contact labels', () =
   assert.equal(result.includes('////'), false)
   assert.equal(result.includes('ご連絡先'), false)
   assert.equal(result.includes('対応時間'), false)
+  assert.equal(result.includes('.｡.'), false)
   assert.equal(result.includes('待遇も充実'), true)
 })
-
