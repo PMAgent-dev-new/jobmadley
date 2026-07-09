@@ -168,15 +168,15 @@ const buildLiftjobFields = (input: ApplicationFields): Record<string, unknown> =
     メールアドレス: input.email,
     求人名: input.jobName,
     求人URL: input.jobUrl,
+    utm_source: input.utmSource,
+    utm_medium: input.utmMedium,
+    utm_campaign: input.utmCampaign,
     応募日: input.appliedAtMillis,
     対応履歴メモ: buildNotes(input, [
       "jobId",
       "companyName",
       "jobLocation",
       "applicationSource",
-      "utmSource",
-      "utmMedium",
-      "utmCampaign",
     ]),
   })
 
