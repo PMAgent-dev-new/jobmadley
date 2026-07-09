@@ -18,13 +18,18 @@ export interface ApplicationFields {
   companyName?: string
   /** 得意先CRM の record_id (RideJob で SingleLink 設定用、lookup 済みのときのみセット) */
   companyRecordId?: string
+  /** 応募経由マスタ の record_id (RideJob の 応募経由(マスタ連動) SingleLink 用、lookup 済みのときのみセット) */
+  applicationSourceRecordId?: string
   jobLocation?: string
   applicationSource?: string
   utmSource?: string
   utmMedium?: string
   utmCampaign?: string
   appliedAtMillis?: number
+  /** 全サービス共通で対応履歴メモに載せる補助テキスト（チャネル / 最終接触日時 等）。 */
   extraNotes?: string[]
+  /** 流入チャネル / 初回接触 / fbclid / gclid 等。RideJob はメモに載せない（mechanic/liftjob のみ）。 */
+  attributionNotes?: string[]
 }
 
 /** RideJob の 得意先CRM テーブル定義 */
@@ -47,6 +52,34 @@ export const resolveRidejobCompanyRecordId = async (
   })
 }
 
+/** RideJob の 応募経由マスタ テーブル定義 */
+const RIDEJOB_APPLICATION_SOURCE_TABLE_ID = "tbl6w045SNt0hJKD"
+const RIDEJOB_APPLICATION_SOURCE_FIELD = "テキスト"
+
+/** applicationSource（正規化済み）→ 応募経由マスタの選択肢名（テキスト列の値）。 */
+const ridejobSourceMasterName = (applicationSource: string | undefined): string => {
+  const s = applicationSource?.trim().toLowerCase()
+  if (s === "standby") return "スタンバイ"
+  if (s === "kyujinbox") return "kbox/feed"
+  return "RIDEJOB HP"
+}
+
+/**
+ * RideJob の 応募経由(マスタ連動) SingleLink 用に、応募経由マスタの record_id を取得。
+ * standby→"スタンバイ" / kyujinbox→"kbox/feed" / それ以外→"RIDEJOB HP" を テキスト列で照合。
+ * 3つの既定値はいずれもマスタに存在するため通常は必ずヒットする。
+ */
+export const resolveRidejobApplicationSourceRecordId = async (
+  applicationSource: string | undefined,
+): Promise<string | undefined> => {
+  return findRecordIdByField({
+    service: "ridejob",
+    tableId: RIDEJOB_APPLICATION_SOURCE_TABLE_ID,
+    fieldName: RIDEJOB_APPLICATION_SOURCE_FIELD,
+    value: ridejobSourceMasterName(applicationSource),
+  })
+}
+
 interface ServiceTableConfig {
   tableId: string
 }
@@ -64,7 +97,11 @@ const joinName = (last?: string, first?: string): string => {
   return `${l} ${f}`.trim()
 }
 
-const buildNotes = (input: ApplicationFields, includeKeys: Array<keyof ApplicationFields>): string => {
+const buildNotes = (
+  input: ApplicationFields,
+  includeKeys: Array<keyof ApplicationFields>,
+  includeAttribution = false,
+): string => {
   const lines: string[] = []
   for (const key of includeKeys) {
     const value = input[key]
@@ -74,6 +111,9 @@ const buildNotes = (input: ApplicationFields, includeKeys: Array<keyof Applicati
   }
   if (input.extraNotes && input.extraNotes.length > 0) {
     lines.push(...input.extraNotes)
+  }
+  if (includeAttribution && input.attributionNotes && input.attributionNotes.length > 0) {
+    lines.push(...input.attributionNotes)
   }
   return lines.join("\n")
 }
@@ -112,28 +152,29 @@ const urlField = (url: string | undefined): { link: string; text: string } | und
 // === サービス別マッピング ===
 
 const buildRidejobFields = (input: ApplicationFields): Record<string, unknown> => {
-  // companyRecordId が解決済みなら SingleLink、未解決なら 対応履歴メモ で会社名を補足
+  // 会社名は CRM 一致時に SingleLink、未一致時のみ 対応履歴メモ にテキスト補足。
   const linked = !!input.companyRecordId
-  // 専用列がある項目（勤務地 / utm_source / utm_medium / utm_campaign）は列へ。残りは対応履歴メモへ。
-  const noteKeys: Array<keyof ApplicationFields> = [
-    "jobId",
-    "jobUrl",
-    ...(linked ? [] : (["companyName"] as Array<keyof ApplicationFields>)),
-    "applicationSource",
-  ]
+  const noteKeys: Array<keyof ApplicationFields> = linked
+    ? []
+    : (["companyName"] as Array<keyof ApplicationFields>)
+  // 専用の求人URL列が無いため、求人名セルに求人URLを併記する（求人名↵URL）。
+  const jobNameWithUrl = [input.jobName, input.jobUrl].filter((v) => v && v.trim()).join("\n") || undefined
   return dropEmpty({
     求職者名: joinName(input.lastName, input.firstName),
     フリガナ: joinName(input.lastNameKana, input.firstNameKana),
     生年月日: input.birthDate,
     電話番号: input.phone,
     メールアドレス: input.email,
-    求人名: input.jobName,
+    求人名: jobNameWithUrl,
     媒体応募先企業名: linked ? [input.companyRecordId] : undefined,
+    "応募経由(マスタ連動)": input.applicationSourceRecordId ? [input.applicationSourceRecordId] : undefined,
     勤務地: input.jobLocation,
     utm_source: input.utmSource,
     utm_medium: input.utmMedium,
     utm_campaign: input.utmCampaign,
     応募日: input.appliedAtMillis,
+    // 求人ID / 応募経由(生) / 流入チャネル / 初回接触 / fbclid / gclid は載せない（列化 or 不要）。
+    // チャネル / 最終接触日時 は extraNotes 経由で残す（includeAttribution=false）。
     対応履歴メモ: buildNotes(input, noteKeys),
   })
 }
@@ -152,11 +193,7 @@ const buildMechanicFields = (input: ApplicationFields): Record<string, unknown> 
     utm_medium: input.utmMedium,
     utm_campaign: input.utmCampaign,
     応募日: input.appliedAtMillis,
-    対応履歴メモ: buildNotes(input, [
-      "jobId",
-      "jobLocation",
-      "applicationSource",
-    ]),
+    対応履歴メモ: buildNotes(input, ["jobId", "jobLocation", "applicationSource"], true),
   })
 
 const buildLiftjobFields = (input: ApplicationFields): Record<string, unknown> =>
@@ -172,12 +209,7 @@ const buildLiftjobFields = (input: ApplicationFields): Record<string, unknown> =
     utm_medium: input.utmMedium,
     utm_campaign: input.utmCampaign,
     応募日: input.appliedAtMillis,
-    対応履歴メモ: buildNotes(input, [
-      "jobId",
-      "companyName",
-      "jobLocation",
-      "applicationSource",
-    ]),
+    対応履歴メモ: buildNotes(input, ["jobId", "companyName", "jobLocation", "applicationSource"], true),
   })
 
 export const buildFieldsForService = (
