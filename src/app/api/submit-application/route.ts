@@ -12,6 +12,7 @@ import { notifyLark } from "@/shared/lark/notify"
 import { createBitableRecord, type BitableCreateResult } from "@/shared/lark/bitable"
 import {
   buildFieldsForService,
+  resolveRidejobApplicationSourceRecordId,
   resolveRidejobCompanyRecordId,
   type ApplicationFields,
 } from "@/shared/lark/bitable-schema"
@@ -182,18 +183,20 @@ const buildInternalLarkCard = (
 }
 
 const buildBitableFields = (input: ApplicationPayload, c: ClassifiedApplication): ApplicationFields => {
+  // extraNotes: 全サービスが対応履歴メモに残す（チャネル / 最終接触日時）。
   const extraNotes: string[] = []
-  if (c.isStandby) extraNotes.push("流入チャネル: スタンバイ")
-  if (c.isKyujinbox) extraNotes.push("流入チャネル: 求人ボックス")
-  // アトリビューション詳細（正規化チャネル・キャンペーン・初回接触・クリックID）を対応履歴メモに集約。
-  // 生の utmSource/utmMedium は下記フィールドで保持しつつ、集計用の正規化チャネルを併記する。
+  // attributionNotes: mechanic/liftjob のみメモに残す（ridejob は列化/不要のため載せない）。
+  const attributionNotes: string[] = []
+  if (c.isStandby) attributionNotes.push("流入チャネル: スタンバイ")
+  if (c.isKyujinbox) attributionNotes.push("流入チャネル: 求人ボックス")
+  // 生の utmSource/utmMedium は専用列で保持しつつ、集計用の正規化チャネルをメモに併記する。
   const { label: channelLabel } = classifyChannel(input.utmSource, input.utmMedium, input.applicationSource)
   extraNotes.push(`チャネル: ${channelLabel}`)
   const firstTouch = [input.utmSourceFirst, input.utmMediumFirst].filter(Boolean).join(" / ")
-  if (firstTouch) extraNotes.push(`初回接触: ${firstTouch}`)
+  if (firstTouch) attributionNotes.push(`初回接触: ${firstTouch}`)
   if (input.utmLastTouchAt) extraNotes.push(`最終接触日時: ${input.utmLastTouchAt}`)
-  if (input.fbclid) extraNotes.push(`fbclid: ${input.fbclid}`)
-  if (input.gclid) extraNotes.push(`gclid: ${input.gclid}`)
+  if (input.fbclid) attributionNotes.push(`fbclid: ${input.fbclid}`)
+  if (input.gclid) attributionNotes.push(`gclid: ${input.gclid}`)
   return {
     lastName: input.lastName,
     firstName: input.firstName,
@@ -212,6 +215,7 @@ const buildBitableFields = (input: ApplicationPayload, c: ClassifiedApplication)
     utmCampaign: input.utmCampaign,
     appliedAtMillis: Date.now(),
     extraNotes,
+    attributionNotes,
   }
 }
 
@@ -332,16 +336,28 @@ export async function POST(request: Request) {
       tasks.push(
         (async (): Promise<TaskResult> => {
           const appFields = buildBitableFields(incoming, classification)
-          if (baseTarget.service === "ridejob" && appFields.companyName) {
+          if (baseTarget.service === "ridejob") {
+            if (appFields.companyName) {
+              try {
+                appFields.companyRecordId = await resolveRidejobCompanyRecordId(appFields.companyName)
+                console.log(
+                  appFields.companyRecordId
+                    ? `[INFO] 得意先CRM linked: ${appFields.companyName} -> ${appFields.companyRecordId}`
+                    : `[INFO] 得意先CRM not found for company: ${appFields.companyName}`,
+                )
+              } catch (error) {
+                console.warn("[WARNING] 得意先CRM lookup failed", error)
+              }
+            }
             try {
-              appFields.companyRecordId = await resolveRidejobCompanyRecordId(appFields.companyName)
+              appFields.applicationSourceRecordId = await resolveRidejobApplicationSourceRecordId(
+                appFields.applicationSource,
+              )
               console.log(
-                appFields.companyRecordId
-                  ? `[INFO] 得意先CRM linked: ${appFields.companyName} -> ${appFields.companyRecordId}`
-                  : `[INFO] 得意先CRM not found for company: ${appFields.companyName}`,
+                `[INFO] 応募経由マスタ linked: ${appFields.applicationSource ?? "-"} -> ${appFields.applicationSourceRecordId ?? "(none)"}`,
               )
             } catch (error) {
-              console.warn("[WARNING] 得意先CRM lookup failed", error)
+              console.warn("[WARNING] 応募経由マスタ lookup failed", error)
             }
           }
           const bitableInput = buildFieldsForService(baseTarget.service, appFields)

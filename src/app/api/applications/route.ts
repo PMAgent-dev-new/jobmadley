@@ -17,6 +17,7 @@ import { notifyLark } from "@/shared/lark/notify"
 import { createBitableRecord, type BitableCreateResult } from "@/shared/lark/bitable"
 import {
   buildFieldsForService,
+  resolveRidejobApplicationSourceRecordId,
   resolveRidejobCompanyRecordId,
   type ApplicationFields,
 } from "@/shared/lark/bitable-schema"
@@ -427,16 +428,25 @@ export async function POST(request: Request) {
     // Base登録 (bitable API)
     const baseTarget = resolveBaseTarget({ isCpOne, isMechanic })
     const bitableFields = buildBitableFieldsFromNormalized(normalized, body)
-    if (baseTarget.service === "ridejob" && bitableFields.companyName) {
+    if (baseTarget.service === "ridejob") {
+      if (bitableFields.companyName) {
+        try {
+          bitableFields.companyRecordId = await resolveRidejobCompanyRecordId(bitableFields.companyName)
+          console.log(
+            bitableFields.companyRecordId
+              ? `[applications] 得意先CRM linked: ${bitableFields.companyName} -> ${bitableFields.companyRecordId}`
+              : `[applications] 得意先CRM not found for company: ${bitableFields.companyName}`,
+          )
+        } catch (error) {
+          console.warn("[applications] 得意先CRM lookup failed", error)
+        }
+      }
       try {
-        bitableFields.companyRecordId = await resolveRidejobCompanyRecordId(bitableFields.companyName)
-        console.log(
-          bitableFields.companyRecordId
-            ? `[applications] 得意先CRM linked: ${bitableFields.companyName} -> ${bitableFields.companyRecordId}`
-            : `[applications] 得意先CRM not found for company: ${bitableFields.companyName}`,
+        bitableFields.applicationSourceRecordId = await resolveRidejobApplicationSourceRecordId(
+          bitableFields.applicationSource,
         )
       } catch (error) {
-        console.warn("[applications] 得意先CRM lookup failed", error)
+        console.warn("[applications] 応募経由マスタ lookup failed", error)
       }
     }
     const bitableInput = buildFieldsForService(baseTarget.service, bitableFields)
