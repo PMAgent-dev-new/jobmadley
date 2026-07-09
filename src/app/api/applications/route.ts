@@ -17,6 +17,8 @@ import { notifyLark } from "@/shared/lark/notify"
 import { createBitableRecord, type BitableCreateResult } from "@/shared/lark/bitable"
 import {
   buildFieldsForService,
+  normalizeApplicantGender,
+  normalizeApplicantPrefecture,
   resolveApplicationSourceRecordId,
   resolveRidejobCompanyRecordId,
   type ApplicationFields,
@@ -198,13 +200,13 @@ const buildBitableFieldsFromNormalized = (
 ): ApplicationFields => {
   const { applicant, job } = normalized
   const qa = (normalized.questionsAndAnswers || []).map((q) => ({ question: q.question, answer: q.answer }))
+  // 性別/市区町村は専用列へ。都道府県は標準47名に一致した時だけ列へ、不一致は生値をメモに残す。
+  const prefecture = normalizeApplicantPrefecture(applicant.prefecture)
+  const rawPrefecture = applicant.prefecture?.trim()
   const extraNotes: string[] = ["流入チャネル: 求人ボックス"]
   if (normalized.id) extraNotes.push(`応募ID: ${normalized.id}`)
-  if (applicant.gender) extraNotes.push(`性別: ${applicant.gender}`)
   if (applicant.occupation) extraNotes.push(`職業: ${applicant.occupation}`)
-  if (applicant.prefecture || applicant.city) {
-    extraNotes.push(`住所: ${[applicant.prefecture, applicant.city].filter(Boolean).join(" ")}`)
-  }
+  if (rawPrefecture && !prefecture) extraNotes.push(`都道府県(未照合): ${rawPrefecture}`)
   if (qa.length > 0) extraNotes.push(`質問回答: ${JSON.stringify(qa)}`)
   if (rawBody?.analytics?.referrer) extraNotes.push(`リファラ: ${rawBody.analytics.referrer}`)
 
@@ -222,6 +224,9 @@ const buildBitableFieldsFromNormalized = (
     companyName: job.companyName,
     jobLocation: job.location,
     applicationSource: "kyujinbox",
+    gender: normalizeApplicantGender(applicant.gender),
+    prefecture,
+    city: applicant.city,
     appliedAtMillis: normalized.appliedOnMillis ?? Date.now(),
     extraNotes,
   }
