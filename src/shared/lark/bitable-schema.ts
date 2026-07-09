@@ -52,12 +52,14 @@ export const resolveRidejobCompanyRecordId = async (
   })
 }
 
-/** RideJob の 応募経由マスタ テーブル定義 */
-const RIDEJOB_APPLICATION_SOURCE_TABLE_ID = "tbl6w045SNt0hJKD"
-const RIDEJOB_APPLICATION_SOURCE_FIELD = "テキスト"
+/** 応募経由マスタ テーブル（サービス別。テキスト列で照合する）。 */
+const APPLICATION_SOURCE_MASTER: Partial<Record<LarkServiceId, { tableId: string; field: string }>> = {
+  ridejob: { tableId: "tbl6w045SNt0hJKD", field: "テキスト" },
+  mechanic: { tableId: "tblzMUVSWmTzmGfA", field: "テキスト" },
+}
 
-/** applicationSource（正規化済み）→ 応募経由マスタの選択肢名（テキスト列の値）。 */
-const ridejobSourceMasterName = (applicationSource: string | undefined): string => {
+/** applicationSource（正規化済み）→ 応募経由マスタの選択肢名（ridejob/mechanic 共通。テキスト列の値）。 */
+const applicationSourceMasterName = (applicationSource: string | undefined): string => {
   const s = applicationSource?.trim().toLowerCase()
   if (s === "standby") return "スタンバイ"
   if (s === "kyujinbox") return "kbox/feed"
@@ -65,18 +67,21 @@ const ridejobSourceMasterName = (applicationSource: string | undefined): string 
 }
 
 /**
- * RideJob の 応募経由(マスタ連動) SingleLink 用に、応募経由マスタの record_id を取得。
+ * 応募経由(マスタ連動) SingleLink 用に、応募経由マスタの record_id を取得（ridejob / mechanic）。
  * standby→"スタンバイ" / kyujinbox→"kbox/feed" / それ以外→"RIDEJOB HP" を テキスト列で照合。
- * 3つの既定値はいずれもマスタに存在するため通常は必ずヒットする。
+ * 3つの既定値はいずれのマスタにも存在するため通常は必ずヒットする。マスタ未定義サービスは undefined。
  */
-export const resolveRidejobApplicationSourceRecordId = async (
+export const resolveApplicationSourceRecordId = async (
+  service: LarkServiceId,
   applicationSource: string | undefined,
 ): Promise<string | undefined> => {
+  const master = APPLICATION_SOURCE_MASTER[service]
+  if (!master) return undefined
   return findRecordIdByField({
-    service: "ridejob",
-    tableId: RIDEJOB_APPLICATION_SOURCE_TABLE_ID,
-    fieldName: RIDEJOB_APPLICATION_SOURCE_FIELD,
-    value: ridejobSourceMasterName(applicationSource),
+    service,
+    tableId: master.tableId,
+    fieldName: master.field,
+    value: applicationSourceMasterName(applicationSource),
   })
 }
 
@@ -189,11 +194,14 @@ const buildMechanicFields = (input: ApplicationFields): Record<string, unknown> 
     求人情報: input.jobName,
     媒体応募先企業名: input.companyName,
     Indeed応募者URL: urlField(input.jobUrl),
+    "応募経由(マスタ連動)": input.applicationSourceRecordId ? [input.applicationSourceRecordId] : undefined,
     utm_source: input.utmSource,
     utm_medium: input.utmMedium,
     utm_campaign: input.utmCampaign,
     応募日: input.appliedAtMillis,
-    対応履歴メモ: buildNotes(input, ["jobId", "jobLocation", "applicationSource"], true),
+    // 求人ID / 勤務地 / 応募経由(生) / 流入チャネル / チャネル / 初回接触 / 最終接触日時 / fbclid / gclid は載せない。
+    // 求人ボックス経由の応募者詳細（extraNotes）は残す。
+    対応履歴メモ: buildNotes(input, []),
   })
 
 const buildLiftjobFields = (input: ApplicationFields): Record<string, unknown> =>

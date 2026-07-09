@@ -12,7 +12,7 @@ import { notifyLark } from "@/shared/lark/notify"
 import { createBitableRecord, type BitableCreateResult } from "@/shared/lark/bitable"
 import {
   buildFieldsForService,
-  resolveRidejobApplicationSourceRecordId,
+  resolveApplicationSourceRecordId,
   resolveRidejobCompanyRecordId,
   type ApplicationFields,
 } from "@/shared/lark/bitable-schema"
@@ -183,18 +183,18 @@ const buildInternalLarkCard = (
 }
 
 const buildBitableFields = (input: ApplicationPayload, c: ClassifiedApplication): ApplicationFields => {
-  // extraNotes: 全サービスが対応履歴メモに残す（チャネル / 最終接触日時）。
+  // extraNotes は求人ボックス連携（applications ルート）が応募者詳細に使うため、内部フォームでは空のまま。
   const extraNotes: string[] = []
-  // attributionNotes: mechanic/liftjob のみメモに残す（ridejob は列化/不要のため載せない）。
+  // attributionNotes: 内部フォームの補助情報。liftjob のみメモに残し、ridejob/mechanic は載せない。
   const attributionNotes: string[] = []
   if (c.isStandby) attributionNotes.push("流入チャネル: スタンバイ")
   if (c.isKyujinbox) attributionNotes.push("流入チャネル: 求人ボックス")
-  // 生の utmSource/utmMedium は専用列で保持しつつ、集計用の正規化チャネルをメモに併記する。
+  // 生の utmSource/utmMedium は専用列で保持しつつ、集計用の正規化チャネルを併記する。
   const { label: channelLabel } = classifyChannel(input.utmSource, input.utmMedium, input.applicationSource)
-  extraNotes.push(`チャネル: ${channelLabel}`)
+  attributionNotes.push(`チャネル: ${channelLabel}`)
   const firstTouch = [input.utmSourceFirst, input.utmMediumFirst].filter(Boolean).join(" / ")
   if (firstTouch) attributionNotes.push(`初回接触: ${firstTouch}`)
-  if (input.utmLastTouchAt) extraNotes.push(`最終接触日時: ${input.utmLastTouchAt}`)
+  if (input.utmLastTouchAt) attributionNotes.push(`最終接触日時: ${input.utmLastTouchAt}`)
   if (input.fbclid) attributionNotes.push(`fbclid: ${input.fbclid}`)
   if (input.gclid) attributionNotes.push(`gclid: ${input.gclid}`)
   return {
@@ -336,25 +336,26 @@ export async function POST(request: Request) {
       tasks.push(
         (async (): Promise<TaskResult> => {
           const appFields = buildBitableFields(incoming, classification)
-          if (baseTarget.service === "ridejob") {
-            if (appFields.companyName) {
-              try {
-                appFields.companyRecordId = await resolveRidejobCompanyRecordId(appFields.companyName)
-                console.log(
-                  appFields.companyRecordId
-                    ? `[INFO] 得意先CRM linked: ${appFields.companyName} -> ${appFields.companyRecordId}`
-                    : `[INFO] 得意先CRM not found for company: ${appFields.companyName}`,
-                )
-              } catch (error) {
-                console.warn("[WARNING] 得意先CRM lookup failed", error)
-              }
-            }
+          if (baseTarget.service === "ridejob" && appFields.companyName) {
             try {
-              appFields.applicationSourceRecordId = await resolveRidejobApplicationSourceRecordId(
+              appFields.companyRecordId = await resolveRidejobCompanyRecordId(appFields.companyName)
+              console.log(
+                appFields.companyRecordId
+                  ? `[INFO] 得意先CRM linked: ${appFields.companyName} -> ${appFields.companyRecordId}`
+                  : `[INFO] 得意先CRM not found for company: ${appFields.companyName}`,
+              )
+            } catch (error) {
+              console.warn("[WARNING] 得意先CRM lookup failed", error)
+            }
+          }
+          if (baseTarget.service === "ridejob" || baseTarget.service === "mechanic") {
+            try {
+              appFields.applicationSourceRecordId = await resolveApplicationSourceRecordId(
+                baseTarget.service,
                 appFields.applicationSource,
               )
               console.log(
-                `[INFO] 応募経由マスタ linked: ${appFields.applicationSource ?? "-"} -> ${appFields.applicationSourceRecordId ?? "(none)"}`,
+                `[INFO] 応募経由マスタ linked (${baseTarget.service}): ${appFields.applicationSource ?? "-"} -> ${appFields.applicationSourceRecordId ?? "(none)"}`,
               )
             } catch (error) {
               console.warn("[WARNING] 応募経由マスタ lookup failed", error)
