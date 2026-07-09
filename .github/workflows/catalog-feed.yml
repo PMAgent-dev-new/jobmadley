@@ -40,8 +40,8 @@ jobs:
 
       - run: npm ci
 
-      - name: Test catalog image renderer
-        run: npm run test:catalog-images
+      - name: Test catalog feed
+        run: npm run test:catalog-feed
 
       - name: Generate & publish catalog feed
         run: npm run generate:catalog-feed

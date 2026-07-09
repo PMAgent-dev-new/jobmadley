@@ -8,7 +8,8 @@
     "lint": "eslint",
     "start": "next start",
     "generate:catalog-feed": "tsx scripts/generate-catalog-feed.mts",
-    "test:catalog-images": "tsx --test scripts/lib/catalog-images.test.mts"
+    "test:catalog-images": "tsx --test scripts/lib/catalog-images.test.mts",
+    "test:catalog-feed": "tsx --test scripts/lib/*.test.mts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.1",

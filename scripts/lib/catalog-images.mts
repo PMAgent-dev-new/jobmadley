@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import sharp from 'sharp'
 import { list, put } from '@vercel/blob'
 
-const IMAGE_VERSION = 'v1'
+const IMAGE_VERSION = 'v2'
 const IMAGE_PREFIX = `catalog/images/${IMAGE_VERSION}/`
 const OUTPUT_SIZE = 1080
 const MAX_BYTES = 8 * 1024 * 1024
@@ -71,7 +71,10 @@ async function fetchSourceImage(url: string): Promise<Buffer> {
   let lastError: unknown
   for (let attempt = 1; attempt <= 3; attempt += 1) {
     try {
-      const response = await fetch(url, { signal: AbortSignal.timeout(30_000) })
+      const response = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 RIDEJOB-Catalog-Image/2.0' },
+        signal: AbortSignal.timeout(30_000),
+      })
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const contentType = response.headers.get('content-type') || ''
       if (!contentType.startsWith('image/')) throw new Error(`画像ではありません: ${contentType}`)

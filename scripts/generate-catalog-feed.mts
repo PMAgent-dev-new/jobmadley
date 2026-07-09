@@ -13,7 +13,7 @@
  * 備考:
  *   - サニタイズ / 職種分類 / HTML→text は旧 GAS/node 版と同一ルール（Meta規約対応）。
  *   - content_ids と一致させるため id = microCMS の求人id（= ridejob.jp/job/[id] のルート）。
- *   - price は名目 100 JPY（価格オーバーレイOFF前提。給与は description と custom_label_3 に格納）。
+ *   - price は名目 1 JPY（価格オーバーレイOFF前提。給与は description と custom_label_3 に格納）。
  *   - 緯度経度(availability_circle) / neighborhoods は Meta 標準カタログで不要のため出力しない。
  */
 import { createClient } from 'microcms-js-sdk'
@@ -23,6 +23,10 @@ import {
   canonicalImageSource,
   prepareCatalogImages,
 } from './lib/catalog-images.mts'
+import {
+  catalogHtmlToText,
+  sanitizeCatalogText,
+} from './lib/catalog-text.mts'
 
 // 市区町村→[緯度, 経度]（国土地理院ジオコーディングで事前生成した静的データ）。
 // Meta の住所検証は「有効な緯度経度 または 国+市町村」を要求するため、
@@ -73,73 +77,6 @@ type Job = {
   holidays?: string
   access?: string
   descriptionOther?: string
-}
-
-// ===== サニタイズ（旧 GAS/node 版と同一ルール） =====
-const BENEFIT_CTX =
-  /手当|支給|扶養|児童|お子|子ども|こども|子供|定年|再雇用|経験|勤続|運転(歴|経験)|免許|普通車|大型|二種|入社\d|歴\d|実務\d|キャリア\d|年以上の(経験|実務|キャリア|勤務)/
-
-type Rule = { re: RegExp; action: 'drop' | 'replace'; unless?: RegExp }
-const RULES: Rule[] = [
-  { re: /(男性|女性|男子|女子)\s*(のみ|限定|歓迎|募集)|男女問わず|性別不問/g, action: 'drop' },
-  { re: /[0-9０-９]{1,3}\s*歳\s*(以上|以下|未満|まで)(の方|の人|歓迎|対象|応募|採用|限定)?/g, action: 'drop', unless: BENEFIT_CTX },
-  { re: /[〜~ー－\-–—]\s*[0-9０-９]{1,3}\s*歳/g, action: 'drop', unless: BENEFIT_CTX },
-  { re: /(年齢|応募資格)[:：]?[^。\n]{0,10}?[0-9０-９]{1,3}\s*歳/g, action: 'drop', unless: BENEFIT_CTX },
-  { re: /(若手|シニア|ミドル)\s*(のみ|限定|歓迎)/g, action: 'drop' },
-  { re: /(日本人|外国人|帰化)\s*(のみ|限定)/g, action: 'drop' },
-  { re: /(既婚|未婚|独身)\s*(のみ|限定|歓迎)/g, action: 'drop' },
-  { re: /(絶対|必ず|確実に儲か|No\.?1|日本一|業界一|最高峰|誰でも稼げる|高収入確約|青天井|天井なし)/gi, action: 'replace' },
-]
-
-function sanitize(text: string): { clean: string; flags: string[] } {
-  const flags: string[] = []
-  let sentences = String(text || '').split(/(?<=[。\n！？])|(?=・)/)
-  sentences = sentences.filter((s) => {
-    for (const r of RULES) {
-      if (r.action !== 'drop') continue
-      r.re.lastIndex = 0
-      if (r.re.test(s)) {
-        r.re.lastIndex = 0
-        if (r.unless && r.unless.test(s)) continue
-        flags.push('[DROP] ' + s.trim().slice(0, 40))
-        return false
-      }
-    }
-    return true
-  })
-  let out = sentences.join('')
-  for (const rr of RULES) {
-    if (rr.action === 'replace') out = out.replace(rr.re, (m) => { flags.push('[REPL] ' + m); return '' })
-  }
-  // 空白は畳むが改行は保持する（説明文の段落構造を残すため）
-  const clean = out
-    .replace(/[^\S\n]+/g, ' ')
-    .replace(/ *\n */g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim()
-  return { clean, flags }
-}
-
-function htmlToText(html: string): string {
-  return String(html || '')
-    .replace(/<\s*(br|\/p|\/h[1-6]|\/li)\s*\/?>/gi, '\n')
-    .replace(/<li[^>]*>/gi, '\n・')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    .replace(/&#x?[0-9a-f]+;/gi, '')
-    .replace(/[\u{1F000}-\u{1FAFF}\u{1F1E6}-\u{1F1FF}\u{2300}-\u{27BF}\u{2B00}-\u{2BFF}\u{2190}-\u{21FF}\u{FE00}-\u{FE0F}\u{200D}\u{2122}\u{2139}\u{E000}-\u{F8FF}]/gu, '')
-    .replace(/[■□◆◇★☆▼▲▽△●◎※→⇒⇨➡←↑↓✓✔✕✖❌⭕]+/g, '')
-    .replace(/[・･‣◦]{2,}/g, '・') // 連打（装飾）のみ単一化。単独の・は箇条書き/並記として保持
-    .replace(/[!！]{2,}/g, '！').replace(/[?？]{2,}/g, '？')
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u200B-\u200F\uFEFF]/g, '')
-    .replace(/[＆&]/g, 'と').replace(/[<>＜＞]/g, '')
-    .replace(/https?:\/\/[^\s　、。)）」』]+/g, '')
-    .replace(/(?:[A-Za-z0-9\-]+\.)+(?:co\.jp|jp|com|net|org)(?:\/[^\s　、。]*)?/g, '')
-    .replace(/[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g, '')
-    .replace(/(?:☎|TEL|Tel|tel|電話番号?|お問[合い]わせ先?)\s*[:：]?\s*/g, '')
-    .replace(/0120[-－\s]?\d{2,3}[-－\s]?\d{3,4}/g, '')
-    .replace(/0\d{1,4}[-－(（\s]?\d{1,4}[-－)）\s]?\d{3,4}/g, '')
-    .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
 }
 
 const hasResidualPictograph = (s: string): boolean => /\p{Extended_Pictographic}/u.test(s || '')
@@ -275,22 +212,32 @@ function buildDescriptionText(job: Job, region: string, locality: string): strin
   if (summary) parts.push(summary)
   for (const [label, body] of sections) {
     if (!body || !body.trim()) continue
-    const text = htmlToText(body)
+    const text = catalogHtmlToText(body)
     if (!text) continue
     parts.push(label ? `【${label}】\n${text}` : text)
   }
   if (parts.length === (summary ? 1 : 0)) {
-    const fallback = htmlToText(job.descriptionWork ?? job.descriptionAppeal ?? job.title ?? '')
+    const fallback = catalogHtmlToText(job.descriptionWork ?? job.descriptionAppeal ?? job.title ?? '')
     if (fallback) parts.push(fallback)
   }
   return parts.join('\n\n')
 }
 
-// ===== 画像（og:image 相当） =====
+// ===== 画像 =====
+// 求人元画像には企業横断で使えない給与・休日等の訴求が焼き込まれているため、
+// カタログでは内容不一致を起こさない職種別の汎用写真に統一する。
+const SAFE_DRIVER_IMAGE_SOURCE = 'https://ridejob.jp/images/taxi.png'
+const SAFE_MECHANIC_IMAGE_SOURCE =
+  'https://images.microcms-assets.io/assets/d8be402905d044ddbce7c2cde4918238/767a5eca263545c29beda317671745f0/1756890266438.jpg'
+
 function imageSource(job: Job): string {
-  const u = job.images?.[0]?.url || job.imageUrl || ''
-  if (!u || /\/OGP\.png|default|placeholder/i.test(u)) return ''
-  return canonicalImageSource(u)
+  const title = job.jobName ?? job.title ?? ''
+  const category = classify(title, job.descriptionWork ?? '')
+  if (category === 'mechanic') return canonicalImageSource(SAFE_MECHANIC_IMAGE_SOURCE)
+  if (category === 'taxi' || category === 'hire' || category === 'dispatch') {
+    return canonicalImageSource(SAFE_DRIVER_IMAGE_SOURCE)
+  }
+  return ''
 }
 
 // Blob未設定のローカル実行だけで使う縮退URL。本番Actionでは必ず再レンダリング済みBlobを使う。
@@ -338,12 +285,12 @@ function toRow(job: Job, generatedImages: Map<string, string>): Record<string, s
   if (region && locality && !geo) console.warn(`[catalog-feed] 座標未登録の市区町村: ${region}${locality} (catalog-city-geo.json に追加してください)`)
 
   const descSrc = buildDescriptionText(job, region, locality)
-  const desc = sanitize(descSrc)
+  const desc = sanitizeCatalogText(descSrc)
   const removalRate = 1 - desc.clean.length / Math.max(1, descSrc.length)
   const dropCount = desc.flags.filter((f) => f.startsWith('[DROP]')).length
   if (removalRate > 0.35 || desc.clean.length < 120 || dropCount >= 3 || hasResidualPictograph(desc.clean)) return null
 
-  const titleS = sanitize(`${titleRaw}${locality ? `（${locality}）` : ''}`)
+  const titleS = sanitizeCatalogText(`${titleRaw}${locality ? `（${locality}）` : ''}`)
 
   return {
     id: job.id,
@@ -351,7 +298,7 @@ function toRow(job: Job, generatedImages: Map<string, string>): Record<string, s
     description: clip(desc.clean, 9999),
     availability: 'in stock',
     condition: 'new',
-    price: '100 JPY', // 名目（価格オーバーレイOFF前提。給与は description / custom_label_3 に格納）
+    price: '1 JPY', // 名目（価格オーバーレイOFF前提。給与は description / custom_label_3 に格納）
     link: `https://ridejob.jp/job/${job.id}?utm_content=${job.id}&utm_source=meta&utm_medium=catalog`,
     image_link: img,
     brand: clip(job.companyName || 'RIDEJOB', 100),
