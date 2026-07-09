@@ -17,7 +17,7 @@ import { notifyLark } from "@/shared/lark/notify"
 import { createBitableRecord, type BitableCreateResult } from "@/shared/lark/bitable"
 import {
   buildFieldsForService,
-  resolveRidejobApplicationSourceRecordId,
+  resolveApplicationSourceRecordId,
   resolveRidejobCompanyRecordId,
   type ApplicationFields,
 } from "@/shared/lark/bitable-schema"
@@ -428,21 +428,22 @@ export async function POST(request: Request) {
     // Base登録 (bitable API)
     const baseTarget = resolveBaseTarget({ isCpOne, isMechanic })
     const bitableFields = buildBitableFieldsFromNormalized(normalized, body)
-    if (baseTarget.service === "ridejob") {
-      if (bitableFields.companyName) {
-        try {
-          bitableFields.companyRecordId = await resolveRidejobCompanyRecordId(bitableFields.companyName)
-          console.log(
-            bitableFields.companyRecordId
-              ? `[applications] 得意先CRM linked: ${bitableFields.companyName} -> ${bitableFields.companyRecordId}`
-              : `[applications] 得意先CRM not found for company: ${bitableFields.companyName}`,
-          )
-        } catch (error) {
-          console.warn("[applications] 得意先CRM lookup failed", error)
-        }
-      }
+    if (baseTarget.service === "ridejob" && bitableFields.companyName) {
       try {
-        bitableFields.applicationSourceRecordId = await resolveRidejobApplicationSourceRecordId(
+        bitableFields.companyRecordId = await resolveRidejobCompanyRecordId(bitableFields.companyName)
+        console.log(
+          bitableFields.companyRecordId
+            ? `[applications] 得意先CRM linked: ${bitableFields.companyName} -> ${bitableFields.companyRecordId}`
+            : `[applications] 得意先CRM not found for company: ${bitableFields.companyName}`,
+        )
+      } catch (error) {
+        console.warn("[applications] 得意先CRM lookup failed", error)
+      }
+    }
+    if (baseTarget.service === "ridejob" || baseTarget.service === "mechanic") {
+      try {
+        bitableFields.applicationSourceRecordId = await resolveApplicationSourceRecordId(
+          baseTarget.service,
           bitableFields.applicationSource,
         )
       } catch (error) {
