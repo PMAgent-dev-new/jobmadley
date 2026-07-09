@@ -213,11 +213,14 @@ const buildLiftjobFields = (input: ApplicationFields): Record<string, unknown> =
     メールアドレス: input.email,
     求人名: input.jobName,
     求人URL: input.jobUrl,
+    // 応募経由(マスタ連動) は MultiSelect（インライン選択肢）。SingleLink と違い record_id ではなく
+    // 選択肢名の配列で書く。standby→"スタンバイ" / kyujinbox→"kbox/feed" / 他→"RIDEJOB HP"。
+    "応募経由(マスタ連動)": [applicationSourceMasterName(input.applicationSource)],
     utm_source: input.utmSource,
     utm_medium: input.utmMedium,
     utm_campaign: input.utmCampaign,
     応募日: input.appliedAtMillis,
-    対応履歴メモ: buildNotes(input, ["jobId", "companyName", "jobLocation", "applicationSource"], true),
+    対応履歴メモ: buildNotes(input, ["jobId", "companyName", "jobLocation"], true),
   })
 
 export const buildFieldsForService = (
