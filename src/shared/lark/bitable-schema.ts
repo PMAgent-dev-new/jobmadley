@@ -22,6 +22,10 @@ export interface ApplicationFields {
   applicationSourceRecordId?: string
   jobLocation?: string
   applicationSource?: string
+  /** 求人ボックス経由の応募者属性（内部フォームは未使用）。性別/都道府県=SingleSelect、市区町村=Text。 */
+  gender?: string
+  prefecture?: string
+  city?: string
   utmSource?: string
   utmMedium?: string
   utmCampaign?: string
@@ -144,6 +148,31 @@ const dropEmpty = (fields: Record<string, unknown>): Record<string, unknown> => 
   return out
 }
 
+/** 求人ボックスの性別値を 性別 SingleSelect の選択肢（男性/女性）に正規化。不明は undefined（列に書かない）。 */
+export const normalizeApplicantGender = (gender: string | undefined): string | undefined => {
+  const g = gender?.trim().toLowerCase()
+  if (g === "male" || g === "男性" || g === "m") return "男性"
+  if (g === "female" || g === "女性" || g === "f") return "女性"
+  return undefined
+}
+
+/** 標準47都道府県名。SingleSelect にゴミ選択肢/エラーを作らないよう、一致する値だけ列へ書く。 */
+const JAPAN_PREFECTURES = new Set([
+  "北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県",
+  "茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県",
+  "新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県", "岐阜県",
+  "静岡県", "愛知県", "三重県", "滋賀県", "京都府", "大阪府", "兵庫県",
+  "奈良県", "和歌山県", "鳥取県", "島根県", "岡山県", "広島県", "山口県",
+  "徳島県", "香川県", "愛媛県", "高知県", "福岡県", "佐賀県", "長崎県",
+  "熊本県", "大分県", "宮崎県", "鹿児島県", "沖縄県",
+])
+
+/** 都道府県が標準47名に一致すれば返す。不一致は undefined（列に書かず、呼び出し側でメモに残す）。 */
+export const normalizeApplicantPrefecture = (prefecture: string | undefined): string | undefined => {
+  const p = prefecture?.trim()
+  return p && JAPAN_PREFECTURES.has(p) ? p : undefined
+}
+
 /**
  * Lark の URL(ハイパーリンク)型フィールド用に文字列を {link, text} に変換する。
  * URL型フィールドは文字列を直接受け付けず、渡すと URLFieldConvFail でレコード作成全体が失敗する。
@@ -174,6 +203,9 @@ const buildRidejobFields = (input: ApplicationFields): Record<string, unknown> =
     媒体応募先企業名: linked ? [input.companyRecordId] : undefined,
     "応募経由(マスタ連動)": input.applicationSourceRecordId ? [input.applicationSourceRecordId] : undefined,
     勤務地: input.jobLocation,
+    性別: input.gender,
+    都道府県: input.prefecture,
+    市区町村以下: input.city,
     utm_source: input.utmSource,
     utm_medium: input.utmMedium,
     utm_campaign: input.utmCampaign,
@@ -195,6 +227,9 @@ const buildMechanicFields = (input: ApplicationFields): Record<string, unknown> 
     媒体応募先企業名: input.companyName,
     Indeed応募者URL: urlField(input.jobUrl),
     "応募経由(マスタ連動)": input.applicationSourceRecordId ? [input.applicationSourceRecordId] : undefined,
+    性別: input.gender,
+    "居住地/都道府県": input.prefecture,
+    "居住地/市区町村以下": input.city,
     utm_source: input.utmSource,
     utm_medium: input.utmMedium,
     utm_campaign: input.utmCampaign,
@@ -216,6 +251,9 @@ const buildLiftjobFields = (input: ApplicationFields): Record<string, unknown> =
     // 応募経由(マスタ連動) は MultiSelect（インライン選択肢）。SingleLink と違い record_id ではなく
     // 選択肢名の配列で書く。standby→"スタンバイ" / kyujinbox→"kbox/feed" / 他→"RIDEJOB HP"。
     "応募経由(マスタ連動)": [applicationSourceMasterName(input.applicationSource)],
+    性別: input.gender,
+    "居住地-都道府県": input.prefecture,
+    "居住地-市区町村以下": input.city,
     utm_source: input.utmSource,
     utm_medium: input.utmMedium,
     utm_campaign: input.utmCampaign,
