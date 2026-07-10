@@ -11,18 +11,20 @@ import {
   computeHubStats,
   buildHubSummary,
   buildHubFaqs,
-  parsePage,
-  pagedUrl,
   findGroup,
   getHubContent,
 } from "@/features/hub/lib/hub"
 
-// オンデマンドISR（sitemapで全ハブをクロール可能に）
+// オンデマンドISR（generateStaticParams=[] で動的セグメントをISR化）。ページングは廃止し
+// 上位 HUB_PAGE_SIZE 件＋「すべて見る」→/search に集約。求人はsitemapで全件クロール可。
 export const revalidate = 3600
+export const dynamicParams = true
+export function generateStaticParams(): { group: string }[] {
+  return []
+}
 
 interface Props {
   params: Promise<{ group: string }>
-  searchParams: Promise<{ page?: string }>
 }
 
 /** グループの catSlugs を実カテゴリID配列へ解決 */
@@ -34,28 +36,24 @@ const resolveCatIds = (
     .map((s) => categories.find((c) => c.slug === s)?.id)
     .filter((id): id is string => Boolean(id))
 
-export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { group: groupSlug } = await params
-  const page = parsePage((await searchParams).page)
   const group = findGroup(groupSlug)
   if (!group) return { title: "求人が見つかりません", robots: { index: false, follow: false } }
   const { categories, matrix } = await getHubData()
   const catIds = resolveCatIds(group, categories)
   const count = catIds.reduce((s, id) => s + (matrix.byCategory[id] ?? 0), 0)
   const base = hubUrl.group(group.slug)
-  const content = page <= 1 ? await getHubContent(base) : null
-  const meta = generateHubMetadata({
-    title: page > 1 ? `${group.name}の求人・転職（全国）（${page}ページ目）` : `${group.name}の求人・転職（全国）｜${count}件`,
+  const content = await getHubContent(base)
+  return generateHubMetadata({
+    title: `${group.name}の求人・転職（全国）｜${count}件`,
     description: content?.lead || group.lead,
-    canonicalPath: pagedUrl(base, page),
+    canonicalPath: base,
   })
-  if (page > 1) meta.robots = { index: false, follow: true }
-  return meta
 }
 
-export default async function Page({ params, searchParams }: Props) {
+export default async function Page({ params }: Props) {
   const { group: groupSlug } = await params
-  const page = parsePage((await searchParams).page)
   const group = findGroup(groupSlug)
   if (!group) notFound()
 
@@ -66,14 +64,12 @@ export default async function Page({ params, searchParams }: Props) {
     categoryIds: catIds,
     orders: "-publishedAt",
     limit: HUB_PAGE_SIZE,
-    offset: (page - 1) * HUB_PAGE_SIZE,
   })
-  const totalPages = Math.max(1, Math.ceil(totalCount / HUB_PAGE_SIZE))
-  const isFirst = page <= 1
   const base = hubUrl.group(group.slug)
 
-  const stats = { ...computeHubStats(isFirst ? await getGroupJobsForStats(catIds) : jobs), count: totalCount }
-  const content = isFirst ? await getHubContent(base) : null
+  const statsJobs = totalCount > jobs.length ? await getGroupJobsForStats(catIds) : jobs
+  const stats = { ...computeHubStats(statsJobs), count: totalCount }
+  const content = await getHubContent(base)
 
   // 含まれる職種の全国ハブへのリンク（件数の多い順）
   const catLinks = group.catSlugs
@@ -97,11 +93,8 @@ export default async function Page({ params, searchParams }: Props) {
       stats={stats}
       totalCount={totalCount}
       jobs={jobs}
-      faqs={isFirst ? buildHubFaqs({ catName: group.name, stats }) : []}
+      faqs={buildHubFaqs({ catName: group.name, stats })}
       moreHref={searchUrl({})}
-      page={page}
-      totalPages={totalPages}
-      pageHref={(n) => pagedUrl(base, n)}
       related={[{ title: `${group.name}の職種から探す`, links: catLinks }]}
     />
   )

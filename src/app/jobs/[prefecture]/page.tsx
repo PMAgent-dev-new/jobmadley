@@ -16,40 +16,38 @@ import {
   computeHubStats,
   buildHubSummary,
   buildHubFaqs,
-  parsePage,
-  pagedUrl,
   getHubContent,
 } from "@/features/hub/lib/hub"
 
-// オンデマンドISR（レート制限回避のためビルド時一括SSGはしない。sitemapで全ハブをクロール可能に）
+// オンデマンドISR（generateStaticParams=[] で動的セグメントをISR化）。ページングは廃止し
+// 上位 HUB_PAGE_SIZE 件＋「すべて見る」→/search に集約。求人はsitemapで全件クロール可。
 export const revalidate = 3600
+export const dynamicParams = true
+export function generateStaticParams(): { prefecture: string }[] {
+  return []
+}
 
 interface Props {
   params: Promise<{ prefecture: string }>
-  searchParams: Promise<{ page?: string }>
 }
 
-export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { prefecture } = await params
-  const page = parsePage((await searchParams).page)
   const { prefectures, matrix } = await getHubData()
   const pref = prefectures.find((p) => p.slug === prefecture)
   if (!pref) return { title: "求人が見つかりません", robots: { index: false, follow: false } }
   const count = matrix.byPrefecture[pref.id] ?? 0
   const base = hubUrl.prefecture(pref.slug!)
-  const content = page <= 1 ? await getHubContent(base) : null
-  const meta = generateHubMetadata({
-    title: page > 1 ? `${hubTitle.prefecture(pref.region)}（${page}ページ目）` : `${hubTitle.prefecture(pref.region)}｜${count}件`,
+  const content = await getHubContent(base)
+  return generateHubMetadata({
+    title: `${hubTitle.prefecture(pref.region)}｜${count}件`,
     description: content?.lead || hubLead.prefecture(pref.region, count),
-    canonicalPath: pagedUrl(base, page),
+    canonicalPath: base,
   })
-  if (page > 1) meta.robots = { index: false, follow: true }
-  return meta
 }
 
-export default async function Page({ params, searchParams }: Props) {
+export default async function Page({ params }: Props) {
   const { prefecture } = await params
-  const page = parsePage((await searchParams).page)
   const { prefectures, categories, matrix } = await getHubData()
   const pref = prefectures.find((p) => p.slug === prefecture)
   if (!pref) notFound()
@@ -58,10 +56,7 @@ export default async function Page({ params, searchParams }: Props) {
     prefectureId: pref.id,
     orders: "-publishedAt",
     limit: HUB_PAGE_SIZE,
-    offset: (page - 1) * HUB_PAGE_SIZE,
   })
-  const totalPages = Math.max(1, Math.ceil(totalCount / HUB_PAGE_SIZE))
-  const isFirst = page <= 1
 
   // この県で求人がある職種ハブへのリンク（件数しきい値以上）
   const catsInKen = withSlug(categories)
@@ -72,13 +67,11 @@ export default async function Page({ params, searchParams }: Props) {
     }))
 
   const base = hubUrl.prefecture(pref.slug!)
-  const statsJobs = isFirst
-    ? totalCount > jobs.length
-      ? await getJobsForStats({ prefectureId: pref.id })
-      : jobs
+  const statsJobs = totalCount > jobs.length
+    ? await getJobsForStats({ prefectureId: pref.id })
     : jobs
   const stats = { ...computeHubStats(statsJobs), count: totalCount }
-  const content = isFirst ? await getHubContent(base) : null
+  const content = await getHubContent(base)
 
   return (
     <HubPage
@@ -94,11 +87,8 @@ export default async function Page({ params, searchParams }: Props) {
       stats={stats}
       totalCount={totalCount}
       jobs={jobs}
-      faqs={isFirst ? buildHubFaqs({ region: pref.region, stats }) : []}
+      faqs={buildHubFaqs({ region: pref.region, stats })}
       moreHref={searchUrl({ prefectureId: pref.id })}
-      page={page}
-      totalPages={totalPages}
-      pageHref={(n) => pagedUrl(base, n)}
       related={[{ title: `${pref.region}の職種から探す`, links: catsInKen }]}
     />
   )
