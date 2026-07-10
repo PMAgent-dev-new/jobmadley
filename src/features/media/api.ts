@@ -43,7 +43,14 @@ export async function getMediaArticlesByKeyword(keyword: string, limit = 3): Pro
   try {
     const data = await fetchList<BlogArticle>({
       endpoint: "blogs",
-      queries: { q: keyword, filters: "category[equals]4", limit, orders: "-publishedAt" },
+      // q(全文検索)だと「運転代行」「軽貨物」などキーワードを言及するだけの記事が
+      // 混入するため、title[contains] で本題の記事に限定する（例: title に「タクシー」を
+      // 含む＝タクシー運転手の年収/適性/個人タクシー等。運転代行等はタイトルに含まず除外）。
+      queries: {
+        filters: `category[equals]4[and]title[contains]${keyword}`,
+        limit,
+        orders: "-publishedAt",
+      },
       context: `getMediaArticlesByKeyword:${keyword}`,
       client: "media",
     })
