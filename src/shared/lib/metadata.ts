@@ -137,18 +137,34 @@ export const generateSearchMetadata = (params: {
  * 求人詳細ページのメタデータ
  */
 export const generateJobMetadata = (job: JobDetail): Metadata => {
-  const title = `${job.jobName ?? job.title} - ${job.companyName ?? '企業名非公開'}`
-  const locationText = job.municipality?.name 
-    ? `${job.municipality.name}（${job.prefecture?.region}）`
-    : job.prefecture?.region || '勤務地未定'
-  
+  const jobName = job.jobName ?? job.title
+  // 非公開指定の求人は実企業名を露出しない（JobPosting と同じ「非公開」表記に統一）
+  const company = job.hideCompanyName ? '非公開' : (job.companyName ?? '企業名非公開')
+
+  // 勤務地は JobPosting と同じ堅牢な解決に統一。prefecture リレーション欠損時は
+  // addressPrefMuni 文字列からパースする。旧実装は region 欠損で「勤務地未定」と
+  // 誤表示し、同ページの JobPosting が県名を持つのと矛盾していた（P1-2 バグ）。
+  const parsed = parseAddressPrefMuni(job.addressPrefMuni)
+  const region = job.prefecture?.region ?? parsed.region
+  const locality = job.municipality?.name ?? parsed.locality
+
+  // 地域プリフィックスでローカル検索（「地域 職種 求人」）を強化（P1-3）。
+  // SERP は末尾から切断されるため、価値の高い地域名を先頭に置いて生存させる。
+  const title = `${region ? `${region}｜` : ''}${jobName} - ${company}`
+
+  const locationText =
+    locality && region ? `${locality}（${region}）` : region || locality || ''
+
   const salaryText = job.salaryMin && job.salaryMax
     ? `月給${job.salaryMin.toLocaleString()}円～${job.salaryMax.toLocaleString()}円`
     : job.salaryMin
     ? `月給${job.salaryMin.toLocaleString()}円〜`
     : '給与応相談'
-  
-  const description = `${locationText}の${job.jobCategory?.name || 'ドライバー'}求人。${salaryText}。${job.descriptionAppeal || job.descriptionWork || '詳細情報をご確認ください。'}`
+
+  const appeal = job.descriptionAppeal || job.descriptionWork || '詳細情報をご確認ください。'
+  const description = locationText
+    ? `${locationText}の${job.jobCategory?.name || 'ドライバー'}求人。${salaryText}。${appeal}`
+    : `${job.jobCategory?.name || 'ドライバー'}求人。${salaryText}。${appeal}`
   
   const imageUrl = job.images?.[0]?.url || job.imageUrl || OGP_IMAGE
   
