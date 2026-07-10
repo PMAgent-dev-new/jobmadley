@@ -10,6 +10,20 @@ const logFailure = (context: string, detail: Record<string, unknown>, error: unk
   console.error(`[microCMS:${context}] ${detail.message ?? "request failed"}`, { ...detail, error })
 }
 
+// ISR を有効化するためのキャッシュ指定。
+// Next 16 では fetch の既定が no-store（未キャッシュ）で、未キャッシュ fetch を検出すると
+// Next はルート全体を動的レンダリングに切り替える。その結果、動的 API を使わない求人詳細
+// （/job/[id]）まで毎回 SSR され、revalidate=3600 が無効化されていた。
+// microCMS 取得を revalidate 付きでキャッシュすることで、こうしたページを ISR（静的）に戻す。
+// プレビュー（draftKey 付き）は常に最新を取得するため no-store のままにする。
+const REVALIDATE_SECONDS = 3600
+
+const buildRequestInit = (queries?: MicroCMSQueries): RequestInit => {
+  const hasDraftKey = Boolean(queries && (queries as Record<string, unknown>).draftKey)
+  if (hasDraftKey) return { cache: "no-store" }
+  return { next: { revalidate: REVALIDATE_SECONDS } } as RequestInit
+}
+
 export interface FetchListParams<TQueries extends MicroCMSQueries = MicroCMSQueries> {
   endpoint: string
   queries?: TQueries
@@ -24,7 +38,11 @@ export const fetchList = async <T>({
   client = "primary",
 }: FetchListParams): Promise<MicroCMSListResponse<T>> => {
   try {
-    return await clientFor(client).get<MicroCMSListResponse<T>>({ endpoint, queries })
+    return await clientFor(client).get<MicroCMSListResponse<T>>({
+      endpoint,
+      queries,
+      customRequestInit: buildRequestInit(queries),
+    })
   } catch (error) {
     logFailure(context, { endpoint, queries }, error)
     throw error
@@ -47,7 +65,12 @@ export const fetchDetail = async <T>({
   client = "primary",
 }: FetchDetailParams): Promise<T> => {
   try {
-    return await clientFor(client).get<T>({ endpoint, contentId, queries })
+    return await clientFor(client).get<T>({
+      endpoint,
+      contentId,
+      queries,
+      customRequestInit: buildRequestInit(queries),
+    })
   } catch (error) {
     logFailure(context, { endpoint, contentId, queries }, error)
     throw error
