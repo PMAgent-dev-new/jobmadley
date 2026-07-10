@@ -6,7 +6,6 @@ import { generateHubMetadata } from "@/shared/lib/metadata"
 import {
   HUB_PAGE_SIZE,
   hubUrl,
-  searchUrl,
   getHubData,
   computeHubStats,
   buildHubSummary,
@@ -94,7 +93,6 @@ export default async function Page({ params }: Props) {
       totalCount={totalCount}
       jobs={jobs}
       faqs={buildHubFaqs({ catName: group.name, stats })}
-      moreHref={searchUrl({})}
       related={[{ title: `${group.name}の職種から探す`, links: catLinks }]}
     />
   )

@@ -19,6 +19,11 @@ import FilterSidebar from "./components/filter-sidebar"
 import { generateSearchMetadata } from "@/shared/lib/metadata"
 import { hasSearchQuery, normalizeSearchParams } from "@/shared/lib/search-params"
 
+// 検索はリアルタイム性が重要（掲載終了/新着の即時反映）。共有 fetcher が付与する
+// revalidate:3600 をこのルートでは打ち消し、求人取得を常にフレッシュにする。
+// （/job/[id]・ハブは ISR キャッシュを維持。ここだけ force-no-store で上書き。）
+export const fetchCache = "force-no-store"
+
 interface SearchPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }

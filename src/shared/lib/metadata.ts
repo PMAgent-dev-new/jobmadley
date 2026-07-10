@@ -261,7 +261,9 @@ const parseAddressPrefMuni = (
   s?: string,
 ): { region?: string; locality?: string } => {
   if (!s) return {}
-  const m = s.match(/^(.+?[都道府県])((?:.+?郡)?.+?[市区町村])?/)
+  // 非貪欲 [都道府県] は「京都府」を「京都」(京+都)で誤停止させる（都道府県中『京都府』は
+  // 手前に『都』を含む唯一の例外）。特殊4県を明示し、残り43県は『.+?県』で受ける。
+  const m = s.match(/^(北海道|東京都|京都府|大阪府|.+?県)((?:.+?郡)?.+?[市区町村])?/)
   if (!m) return {}
   return { region: m[1], locality: m[2] }
 }
