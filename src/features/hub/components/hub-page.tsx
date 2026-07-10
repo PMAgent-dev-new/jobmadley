@@ -46,25 +46,14 @@ interface HubPageProps {
   /** CMS(hub-contents)の手書き本文HTML（あれば表示） */
   bodyHtml?: string
   faqs?: HubFaq[]
+  /** 「すべて見る」CTA のリンク先（絞り込み済み /search）。表示件数<総件数なら件数付きラベル */
   moreHref?: string
   related?: HubRelatedGroup[]
-  /** 関連お役立ち記事（メディア）へのリンク。1ページ目のみ表示 */
+  /** 関連お役立ち記事（メディア）へのリンク */
   relatedArticles?: HubArticleLink[]
-  /** 現在ページ（1始まり） */
-  page?: number
-  /** 総ページ数 */
-  totalPages?: number
-  /** ページリンク生成（n→href） */
-  pageHref?: (n: number) => string
 }
 
 const jsonLd = (obj: unknown) => JSON.stringify(obj).replace(/</g, "\\u003c")
-
-/** 表示するページ番号（先頭・末尾・現在周辺）を省略記号付きで返す */
-function pageWindow(current: number, total: number): number[] {
-  const s = new Set<number>([1, total, current, current - 1, current + 1])
-  return [...s].filter((n) => n >= 1 && n <= total).sort((a, b) => a - b)
-}
 
 export default function HubPage({
   breadcrumb,
@@ -81,17 +70,12 @@ export default function HubPage({
   moreHref,
   related = [],
   relatedArticles = [],
-  page = 1,
-  totalPages = 1,
-  pageHref,
 }: HubPageProps) {
-  const isFirstPage = page <= 1
   const breadcrumbLd = generateBreadcrumbStructuredData(breadcrumb)
   const itemListLd = generateItemListStructuredData(
     jobs.map((j) => ({ url: `/job/${j.id}`, name: j.jobName ?? j.title })),
   )
-  // 独自コンテンツ（傾向/仕事内容/FAQ）は1ページ目のみ。2ページ目以降は求人一覧の続き。
-  const faqLd = isFirstPage && faqs.length > 0 ? generateFaqStructuredData(faqs) : null
+  const faqLd = faqs.length > 0 ? generateFaqStructuredData(faqs) : null
 
   return (
     <div className="min-h-screen bg-white">
@@ -116,13 +100,10 @@ export default function HubPage({
           </ol>
         </nav>
 
-        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
-          {h1}{!isFirstPage && `（${page}ページ目）`}
-        </h1>
-        {isFirstPage && <p className="mt-3 text-gray-600 leading-relaxed">{lead}</p>}
+        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">{h1}</h1>
+        <p className="mt-3 text-gray-600 leading-relaxed">{lead}</p>
 
-        {/* 概要・傾向（実データ由来の一次情報。1ページ目のみ） */}
-        {isFirstPage && (
+        {/* 概要・傾向（実データ由来の一次情報） */}
         <section className="mt-8" aria-labelledby="hub-overview">
           <h2 id="hub-overview" className="text-xl font-bold text-gray-900 border-l-4 border-primary pl-3">
             {summaryLabel}の求人の傾向
@@ -153,10 +134,9 @@ export default function HubPage({
             )}
           </dl>
         </section>
-        )}
 
-        {/* 職種の解説（Know意図。1ページ目のみ） */}
-        {isFirstPage && categoryContent && (
+        {/* 職種の解説（Know意図） */}
+        {categoryContent && (
           <section className="mt-10" aria-labelledby="hub-about-job">
             <h2 id="hub-about-job" className="text-xl font-bold text-gray-900 border-l-4 border-primary pl-3">
               {categoryContent.catName}の仕事内容・必要な資格
@@ -178,8 +158,8 @@ export default function HubPage({
           </section>
         )}
 
-        {/* CMS(hub-contents)の手書き本文（1ページ目のみ・登録があれば） */}
-        {isFirstPage && bodyHtml && (
+        {/* CMS(hub-contents)の手書き本文（登録があれば） */}
+        {bodyHtml && (
           <section
             className="mt-10 text-gray-700 leading-relaxed [&_h2]:text-xl [&_h2]:font-bold [&_h2]:text-gray-900 [&_h2]:mt-6 [&_h2]:mb-2 [&_h3]:font-semibold [&_h3]:text-gray-900 [&_h3]:mt-4 [&_p]:mt-2 [&_ul]:list-disc [&_ul]:pl-6 [&_ul]:mt-2 [&_ol]:list-decimal [&_ol]:pl-6 [&_ol]:mt-2 [&_a]:text-primary [&_a]:underline"
             dangerouslySetInnerHTML={{ __html: bodyHtml }}
@@ -200,30 +180,6 @@ export default function HubPage({
           ) : (
             <p className="mt-6 text-gray-500">現在この条件に一致する求人はありません。</p>
           )}
-          {totalPages > 1 && pageHref && (
-            <nav aria-label="ページ送り" className="mt-8 flex flex-wrap items-center justify-center gap-2">
-              {page > 1 && (
-                <Link href={pageHref(page - 1)} className="inline-flex items-center min-h-[44px] px-3 py-1.5 rounded border border-gray-300 text-sm text-gray-700 hover:border-primary hover:text-primary">
-                  前へ
-                </Link>
-              )}
-              {pageWindow(page, totalPages).map((n, idx, arr) => (
-                <span key={n} className="flex items-center gap-2">
-                  {idx > 0 && n - arr[idx - 1] > 1 && <span className="text-gray-400">…</span>}
-                  {n === page ? (
-                    <span aria-current="page" className="inline-flex items-center min-h-[44px] px-3 py-1.5 rounded bg-primary text-primary-foreground text-sm font-bold">{n}</span>
-                  ) : (
-                    <Link href={pageHref(n)} className="inline-flex items-center min-h-[44px] px-3 py-1.5 rounded border border-gray-300 text-sm text-gray-700 hover:border-primary hover:text-primary">{n}</Link>
-                  )}
-                </span>
-              ))}
-              {page < totalPages && (
-                <Link href={pageHref(page + 1)} className="inline-flex items-center min-h-[44px] px-3 py-1.5 rounded border border-gray-300 text-sm text-gray-700 hover:border-primary hover:text-primary">
-                  次へ
-                </Link>
-              )}
-            </nav>
-          )}
           {moreHref && (
             <div className="mt-8 text-center">
               <Link
@@ -238,8 +194,8 @@ export default function HubPage({
           )}
         </section>
 
-        {/* よくある質問（AIO / FAQPage。1ページ目のみ） */}
-        {isFirstPage && faqs.length > 0 && (
+        {/* よくある質問（AIO / FAQPage） */}
+        {faqs.length > 0 && (
           <section className="mt-12" aria-labelledby="hub-faq">
             <h2 id="hub-faq" className="text-xl font-bold text-gray-900 border-l-4 border-primary pl-3">
               よくある質問
@@ -255,8 +211,8 @@ export default function HubPage({
           </section>
         )}
 
-        {/* 関連お役立ち記事（ハブ→メディアの相互リンク。1ページ目のみ / P1-1） */}
-        {isFirstPage && relatedArticles.length > 0 && (
+        {/* 関連お役立ち記事（ハブ→メディアの相互リンク / P1-1） */}
+        {relatedArticles.length > 0 && (
           <section className="mt-12" aria-labelledby="hub-articles">
             <h2 id="hub-articles" className="text-xl font-bold text-gray-900 border-l-4 border-primary pl-3">
               {summaryLabel}の仕事を知る・役立つ記事
