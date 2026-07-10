@@ -2,6 +2,7 @@ import { notFound } from "next/navigation"
 import type { Metadata } from "next"
 import HubPage from "@/features/hub/components/hub-page"
 import { getJobsPaged, getJobsForStats } from "@/features/jobs/api"
+import { getMediaArticlesByKeyword } from "@/features/media/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
 import {
   HUB_MIN_JOBS,
@@ -20,6 +21,7 @@ import {
   parsePage,
   pagedUrl,
   getHubContent,
+  hubArticleKeyword,
 } from "@/features/hub/lib/hub"
 
 // 求人詳細ページと同様、オンデマンドISR（初回アクセス/クロールで生成→1時間キャッシュ）。
@@ -96,6 +98,18 @@ export default async function Page({ params, searchParams }: Props) {
   const cc = catContent[cat.slug!]
   const content = isFirst ? await getHubContent(base) : null
 
+  // ハブ→メディア相互リンク（P1-1）。1ページ目のみ、職種に対応するお役立ち記事を掲載
+  const articleKeyword = hubArticleKeyword(cat.slug)
+  const relatedArticles =
+    isFirst && articleKeyword
+      ? (await getMediaArticlesByKeyword(articleKeyword)).map((a) => ({
+          title: a.title,
+          href: `https://ridejob.jp/media/blog/${a.slug ?? a.id}`,
+          image: a.eyecatch?.url,
+          date: a.publishedAt?.slice(0, 10),
+        }))
+      : []
+
   return (
     <HubPage
       breadcrumb={[
@@ -113,6 +127,7 @@ export default async function Page({ params, searchParams }: Props) {
       jobs={jobs}
       categoryContent={isFirst && cc ? { catName: cat.name, ...cc } : undefined}
       faqs={isFirst ? buildHubFaqs({ region: pref.region, catName: cat.name, catSlug: cat.slug!, stats }) : []}
+      relatedArticles={relatedArticles}
       moreHref={searchUrl({ prefectureId: pref.id, jobCategoryId: cat.id })}
       page={page}
       totalPages={totalPages}

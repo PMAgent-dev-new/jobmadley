@@ -15,6 +15,14 @@ export interface HubRelatedGroup {
   links: Array<{ label: string; href: string }>
 }
 
+/** ハブ→メディア記事の相互リンク（P1-1）。href はメディア（別ゾーン）の絶対URL。 */
+export interface HubArticleLink {
+  title: string
+  href: string
+  image?: string
+  date?: string
+}
+
 export interface HubCategoryContent {
   catName: string
   work: string
@@ -40,6 +48,8 @@ interface HubPageProps {
   faqs?: HubFaq[]
   moreHref?: string
   related?: HubRelatedGroup[]
+  /** 関連お役立ち記事（メディア）へのリンク。1ページ目のみ表示 */
+  relatedArticles?: HubArticleLink[]
   /** 現在ページ（1始まり） */
   page?: number
   /** 総ページ数 */
@@ -70,6 +80,7 @@ export default function HubPage({
   faqs = [],
   moreHref,
   related = [],
+  relatedArticles = [],
   page = 1,
   totalPages = 1,
   pageHref,
@@ -234,6 +245,35 @@ export default function HubPage({
                   <h3 className="font-semibold text-gray-900">Q. {f.question}</h3>
                   <p className="mt-2 text-gray-700 leading-relaxed">A. {f.answer}</p>
                 </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* 関連お役立ち記事（ハブ→メディアの相互リンク。1ページ目のみ / P1-1） */}
+        {isFirstPage && relatedArticles.length > 0 && (
+          <section className="mt-12" aria-labelledby="hub-articles">
+            <h2 id="hub-articles" className="text-xl font-bold text-gray-900 border-l-4 border-primary pl-3">
+              {summaryLabel}の仕事を知る・役立つ記事
+            </h2>
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {relatedArticles.map((a) => (
+                <a
+                  key={a.href}
+                  href={a.href}
+                  className="group block overflow-hidden rounded-lg border border-gray-200 transition-colors hover:border-primary"
+                >
+                  {a.image && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={a.image} alt="" loading="lazy" className="h-32 w-full object-cover" />
+                  )}
+                  <div className="p-3">
+                    <p className="line-clamp-2 text-sm font-semibold text-gray-900 group-hover:underline">
+                      {a.title}
+                    </p>
+                    {a.date && <p className="mt-1 text-xs text-gray-500">{a.date}</p>}
+                  </div>
+                </a>
               ))}
             </div>
           </section>
