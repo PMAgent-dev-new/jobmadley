@@ -18,42 +18,40 @@ import {
   buildHubSummary,
   buildHubFaqs,
   catContent,
-  parsePage,
-  pagedUrl,
   groupForCatSlug,
   getHubContent,
   hubArticleKeyword,
 } from "@/features/hub/lib/hub"
 
-// オンデマンドISR（レート制限回避のためビルド時一括SSGはしない。sitemapで全ハブをクロール可能に）
+// オンデマンドISR（generateStaticParams=[] で動的セグメントをISR化）。ページングは廃止し
+// 上位 HUB_PAGE_SIZE 件＋「すべて見る」→/search に集約。求人はsitemapで全件クロール可。
 export const revalidate = 3600
+export const dynamicParams = true
+export function generateStaticParams(): { jobCategory: string }[] {
+  return []
+}
 
 interface Props {
   params: Promise<{ jobCategory: string }>
-  searchParams: Promise<{ page?: string }>
 }
 
-export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { jobCategory } = await params
-  const page = parsePage((await searchParams).page)
   const { categories, matrix } = await getHubData()
   const cat = categories.find((c) => c.slug === jobCategory)
   if (!cat) return { title: "求人が見つかりません", robots: { index: false, follow: false } }
   const count = matrix.byCategory[cat.id] ?? 0
   const base = hubUrl.category(cat.slug!)
-  const content = page <= 1 ? await getHubContent(base) : null
-  const meta = generateHubMetadata({
-    title: page > 1 ? `${hubTitle.category(cat.name)}（${page}ページ目）` : `${hubTitle.category(cat.name)}｜${count}件`,
+  const content = await getHubContent(base)
+  return generateHubMetadata({
+    title: `${hubTitle.category(cat.name)}｜${count}件`,
     description: content?.lead || hubLead.category(cat.name, count),
-    canonicalPath: pagedUrl(base, page),
+    canonicalPath: base,
   })
-  if (page > 1) meta.robots = { index: false, follow: true }
-  return meta
 }
 
-export default async function Page({ params, searchParams }: Props) {
+export default async function Page({ params }: Props) {
   const { jobCategory } = await params
-  const page = parsePage((await searchParams).page)
   const { prefectures, categories, matrix } = await getHubData()
   const cat = categories.find((c) => c.slug === jobCategory)
   if (!cat) notFound()
@@ -62,10 +60,7 @@ export default async function Page({ params, searchParams }: Props) {
     jobCategoryId: cat.id,
     orders: "-publishedAt",
     limit: HUB_PAGE_SIZE,
-    offset: (page - 1) * HUB_PAGE_SIZE,
   })
-  const totalPages = Math.max(1, Math.ceil(totalCount / HUB_PAGE_SIZE))
-  const isFirst = page <= 1
 
   // この職種の求人がある都道府県ハブ（県×職種）へのリンク（件数しきい値以上・多い順）
   const kensForCat = withSlug(prefectures)
@@ -78,27 +73,24 @@ export default async function Page({ params, searchParams }: Props) {
     }))
 
   const base = hubUrl.category(cat.slug!)
-  const statsJobs = isFirst
-    ? totalCount > jobs.length
-      ? await getJobsForStats({ jobCategoryId: cat.id })
-      : jobs
+  const statsJobs = totalCount > jobs.length
+    ? await getJobsForStats({ jobCategoryId: cat.id })
     : jobs
   const stats = { ...computeHubStats(statsJobs), count: totalCount }
   const cc = catContent[cat.slug!]
   const group = groupForCatSlug(cat.slug!)
-  const content = isFirst ? await getHubContent(base) : null
+  const content = await getHubContent(base)
 
-  // ハブ→メディア相互リンク（P1-1）。1ページ目のみ、職種に対応するお役立ち記事を掲載
+  // ハブ→メディア相互リンク（P1-1）
   const articleKeyword = hubArticleKeyword(cat.slug)
-  const relatedArticles =
-    isFirst && articleKeyword
-      ? (await getMediaArticlesByKeyword(articleKeyword)).map((a) => ({
-          title: a.title,
-          href: `https://ridejob.jp/media/blog/${a.slug ?? a.id}`,
-          image: a.eyecatch?.url,
-          date: a.publishedAt?.slice(0, 10),
-        }))
-      : []
+  const relatedArticles = articleKeyword
+    ? (await getMediaArticlesByKeyword(articleKeyword)).map((a) => ({
+        title: a.title,
+        href: `https://ridejob.jp/media/blog/${a.slug ?? a.id}`,
+        image: a.eyecatch?.url,
+        date: a.publishedAt?.slice(0, 10),
+      }))
+    : []
 
   return (
     <HubPage
@@ -114,13 +106,10 @@ export default async function Page({ params, searchParams }: Props) {
       stats={stats}
       totalCount={totalCount}
       jobs={jobs}
-      categoryContent={isFirst && cc ? { catName: cat.name, ...cc } : undefined}
-      faqs={isFirst ? buildHubFaqs({ catName: cat.name, catSlug: cat.slug!, stats }) : []}
+      categoryContent={cc ? { catName: cat.name, ...cc } : undefined}
+      faqs={buildHubFaqs({ catName: cat.name, catSlug: cat.slug!, stats })}
       relatedArticles={relatedArticles}
       moreHref={searchUrl({ jobCategoryId: cat.id })}
-      page={page}
-      totalPages={totalPages}
-      pageHref={(n) => pagedUrl(base, n)}
       related={[
         ...(group
           ? [{ title: `${group.name}の求人を見る`, links: [{ label: `${group.name}の求人一覧（全国）`, href: hubUrl.group(group.slug) }] }]

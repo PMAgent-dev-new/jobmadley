@@ -225,9 +225,14 @@ export default function HubPage({
             </nav>
           )}
           {moreHref && (
-            <div className="mt-6 text-center">
-              <Link href={moreHref} className="text-sm text-primary hover:underline">
-                条件を絞り込んで探す
+            <div className="mt-8 text-center">
+              <Link
+                href={moreHref}
+                className="inline-flex items-center justify-center min-h-[48px] px-6 py-3 rounded-lg bg-primary text-primary-foreground font-bold hover:opacity-90 transition-opacity"
+              >
+                {jobs.length < totalCount
+                  ? `この条件の求人をすべて見る（全${totalCount}件）`
+                  : "条件を絞り込んで探す"}
               </Link>
             </div>
           )}
