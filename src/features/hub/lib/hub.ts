@@ -72,6 +72,23 @@ export const findGroup = (slug: string): HubGroup | undefined => HUB_GROUPS.find
 export const groupForCatSlug = (catSlug: string): HubGroup | undefined =>
   HUB_GROUPS.find((g) => g.catSlugs.includes(catSlug))
 
+/**
+ * 職種 slug → お役立ち記事（メディア category=4）の検索キーワード（P1-1）。
+ * ハブから関連コラムへ相互リンクしトピッククラスタを双方向化する。
+ * 未定義の職種は関連記事セクションを出さない（無関係記事の混入を防ぐ）。
+ */
+const HUB_ARTICLE_KEYWORDS: Record<string, string> = {
+  "taxi-driver": "タクシー",
+  "bus-driver": "バス運転手",
+  "hire-driver": "ハイヤー",
+  "truck-driver": "トラック",
+  "car-mechanic": "整備士",
+  "bike-mechanic": "整備士",
+  "operation-manager": "運行管理者",
+}
+export const hubArticleKeyword = (catSlug?: string): string | undefined =>
+  catSlug ? HUB_ARTICLE_KEYWORDS[catSlug] : undefined
+
 /** 全件を見るための絞り込み検索URL（/search はUI用・noindex） */
 export const searchUrl = (params: { prefectureId?: string; jobCategoryId?: string }) => {
   const q = new URLSearchParams()

@@ -32,3 +32,23 @@ export async function getMediaArticles() {
     interviewArticles: pickThreeRandom(voicePool),
   }
 }
+
+/**
+ * キーワードに関連するお役立ち記事（category=4）を取得。
+ * ハブ（地域×職種・職種）→ メディア記事の相互リンクでトピッククラスタを双方向化する
+ * ために使用（従来はメディア→求人の片方向のみ＝クラスタが片方向だった / P1-1）。
+ * 失敗時は空配列（ハブ本体の描画は止めない）。
+ */
+export async function getMediaArticlesByKeyword(keyword: string, limit = 3): Promise<BlogArticle[]> {
+  try {
+    const data = await fetchList<BlogArticle>({
+      endpoint: "blogs",
+      queries: { q: keyword, filters: "category[equals]4", limit, orders: "-publishedAt" },
+      context: `getMediaArticlesByKeyword:${keyword}`,
+      client: "media",
+    })
+    return data.contents
+  } catch {
+    return []
+  }
+}
