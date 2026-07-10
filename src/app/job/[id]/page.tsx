@@ -23,6 +23,14 @@ interface JobPageProps {
 // 求人更新の即時反映が必要になったら microCMS Webhook → revalidatePath(`/job/${id}`) を追加する。
 export const revalidate = 3600
 
+// 動的セグメントは generateStaticParams が無いと動的レンダリング扱いになり revalidate が
+// 無効化される。空配列を返すことでビルド時は何も事前生成せず（microCMS の 429 回避）、
+// 実アクセス時にオンデマンド ISR（初回生成→キャッシュ→revalidate）へ切り替える。
+export const dynamicParams = true
+export function generateStaticParams(): { id: string }[] {
+  return []
+}
+
 export async function generateMetadata({ params }: JobPageProps): Promise<Metadata> {
   const { id } = await params
 
