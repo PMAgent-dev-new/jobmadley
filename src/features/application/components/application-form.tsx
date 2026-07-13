@@ -128,7 +128,7 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
         })
         hasPushedStandbyCv.current = true
       }
-      window.location.href = resolveApplicationCompleteUrl(job?.applyEmail)
+      window.location.assign(resolveApplicationCompleteUrl(job?.applyEmail))
     } catch (err) {
       alert("応募送信に失敗しました")
     } finally {
@@ -157,6 +157,10 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
 
         {/* 基本情報セクション */}
         <div className="bg-gray-50 p-6 rounded-lg mb-8">
+          {/* react-hook-form の handleSubmit は render 時に onSubmit を呼ばず、返り値のハンドラが
+              submit 時にのみ実行する。onSubmit 内の hasPushedStandbyCv ref 参照を「render 中の ref
+              アクセス」と見なす react-hooks/refs の false positive のため、この行のみ抑制する。 */}
+          {/* eslint-disable-next-line react-hooks/refs */}
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
             <ApplicantFields register={register} errors={errors} />
             <BirthDateSelect setValue={setValue} errors={errors} />

@@ -1,0 +1,55 @@
+name: CI
+
+# PR と main への push で型・lint・テスト・ビルドを検証する。
+# auto-merge パイプラインの品質ゲート（この verify が green のときだけマージを許可する想定）。
+#
+# build ステップは microCMS からデータを取得して静的ページ（/, /sitemap.xml, /jobs-feed.xml 等）を
+# プリレンダーするため、本番(Vercel)と同じ読み取り専用の microCMS 資格情報が必要。
+# 必要な Secrets（Settings → Secrets and variables → Actions）:
+#   - NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN     （既存・catalog-feed と共用）
+#   - MICROCMS_API_KEY                        （既存・catalog-feed と共用）
+#   - NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN_2   （メディア用・要追加）
+#   - MICROCMS_API_KEY_2                       （メディア用・要追加）
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test:catalog-feed
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN: ${{ secrets.NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN }}
+          MICROCMS_API_KEY: ${{ secrets.MICROCMS_API_KEY }}
+          NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN_2: ${{ secrets.NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN_2 }}
+          MICROCMS_API_KEY_2: ${{ secrets.MICROCMS_API_KEY_2 }}
