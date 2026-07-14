@@ -1,14 +1,13 @@
 /**
  * 地域×職種ハブページ共通ロジック（URL・しきい値・リード文・共有データ）。
  */
-import { cache } from "react"
 import { unstable_cache } from "next/cache"
 import { getPrefectures } from "@/features/master/prefectures"
 import { getJobCategories } from "@/features/master/job-categories"
 import { getJobCountMatrix, type JobCountMatrix } from "@/features/jobs/api"
-import { fetchList } from "@/shared/microcms/fetcher"
 import type { Prefecture, JobCategory } from "@/features/master/types"
 import type { Job } from "@/features/jobs/types"
+import hubContentsData from "@/features/hub/hub-contents.data.json"
 
 /** 県×職種ハブを生成する最小求人数（これ未満の組合せは薄いページになるため作らない） */
 export const HUB_MIN_JOBS = 5
@@ -135,29 +134,23 @@ export const withSlug = <T extends { slug?: string }>(items: T[]): (T & { slug: 
   items.filter((i): i is T & { slug: string } => Boolean(i.slug))
 
 /**
- * CMS(microCMS: hub-contents)で管理する任意のハブ本文。
+ * ハブ本文（lead / body）。
+ * 旧実装は microCMS `hub-contents` エンドポイントから取得していたが、無料枠(1サービスにつき5API)に
+ * 収めるため、全131件をリポジトリ同梱の hub-contents.data.json へ移行しエンドポイントを廃止した。
+ * 以後の本文編集はこのJSONを直接更新する（CMS管理画面では編集不可）。
  * hubKey はハブのURLパス（例: /jobs/tokyo/taxi-driver）。未登録なら null（→テンプレにフォールバック）。
  */
 export interface HubContent {
-  id: string
   hubKey: string
   lead?: string
   body?: string
 }
-// React cache でリクエスト内メモ化 → generateMetadata と本体で二重取得しない
-export const getHubContent = cache(async (hubKey: string): Promise<HubContent | null> => {
-  try {
-    const data = await fetchList<HubContent>({
-      endpoint: "hub-contents",
-      queries: { filters: `hubKey[equals]${hubKey}`, limit: 1 },
-      context: "getHubContent",
-    })
-    return data.contents[0] ?? null
-  } catch {
-    // hub-contents 未作成やCMS一時障害時はテンプレ表示に落とす（ハブ自体は壊さない）
-    return null
-  }
-})
+const HUB_CONTENTS = hubContentsData as Record<string, { lead?: string; body?: string }>
+// ローカルデータの単純参照（fetch なし）。async は呼び出し側の await 互換のため維持。
+export const getHubContent = async (hubKey: string): Promise<HubContent | null> => {
+  const entry = HUB_CONTENTS[hubKey]
+  return entry ? { hubKey, ...entry } : null
+}
 
 // =====================
 // ハブ本文の独自コンテンツ（thin content 対策）
