@@ -84,6 +84,7 @@ export default async function Page({ params }: Props) {
     ? await getJobsForStats({ prefectureId: pref.id, jobCategoryId: cat.id })
     : jobs
   const stats = { ...computeHubStats(statsJobs), count: totalCount }
+  const jobLinks = statsJobs.slice(0, 200).map((j) => ({ id: j.id, name: j.jobName ?? j.title ?? "求人" }))
   const cc = catContent[cat.slug!]
   const content = await getHubContent(base)
 
@@ -113,6 +114,7 @@ export default async function Page({ params }: Props) {
       stats={stats}
       totalCount={totalCount}
       jobs={jobs}
+      jobLinks={jobLinks}
       categoryContent={cc ? { catName: cat.name, ...cc } : undefined}
       faqs={buildHubFaqs({ region: pref.region, catName: cat.name, catSlug: cat.slug!, stats })}
       relatedArticles={relatedArticles}

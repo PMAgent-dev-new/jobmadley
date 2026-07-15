@@ -71,6 +71,7 @@ export default async function Page({ params }: Props) {
     ? await getJobsForStats({ prefectureId: pref.id })
     : jobs
   const stats = { ...computeHubStats(statsJobs), count: totalCount }
+  const jobLinks = statsJobs.slice(0, 200).map((j) => ({ id: j.id, name: j.jobName ?? j.title ?? "求人" }))
   const content = await getHubContent(base)
 
   return (
@@ -87,6 +88,7 @@ export default async function Page({ params }: Props) {
       stats={stats}
       totalCount={totalCount}
       jobs={jobs}
+      jobLinks={jobLinks}
       faqs={buildHubFaqs({ region: pref.region, stats })}
       moreHref={searchUrl({ prefectureId: pref.id })}
       related={[{ title: `${pref.region}の職種から探す`, links: catsInKen }]}

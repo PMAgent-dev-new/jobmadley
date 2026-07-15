@@ -68,6 +68,7 @@ export default async function Page({ params }: Props) {
 
   const statsJobs = totalCount > jobs.length ? await getGroupJobsForStats(catIds) : jobs
   const stats = { ...computeHubStats(statsJobs), count: totalCount }
+  const jobLinks = statsJobs.slice(0, 200).map((j) => ({ id: j.id, name: j.jobName ?? j.title ?? "求人" }))
   const content = await getHubContent(base)
 
   // 含まれる職種の全国ハブへのリンク（件数の多い順）
@@ -92,6 +93,7 @@ export default async function Page({ params }: Props) {
       stats={stats}
       totalCount={totalCount}
       jobs={jobs}
+      jobLinks={jobLinks}
       faqs={buildHubFaqs({ catName: group.name, stats })}
       related={[{ title: `${group.name}の職種から探す`, links: catLinks }]}
     />
