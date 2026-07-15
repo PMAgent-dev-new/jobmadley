@@ -51,6 +51,8 @@ interface HubPageProps {
   related?: HubRelatedGroup[]
   /** 関連お役立ち記事（メディア）へのリンク */
   relatedArticles?: HubArticleLink[]
+  /** クロール用の求人リンク一覧（表示カードより広く各求人詳細へ内部リンクを張る / SEO内部リンク深化） */
+  jobLinks?: Array<{ id: string; name: string }>
 }
 
 const jsonLd = (obj: unknown) => JSON.stringify(obj).replace(/</g, "\\u003c")
@@ -70,6 +72,7 @@ export default function HubPage({
   moreHref,
   related = [],
   relatedArticles = [],
+  jobLinks = [],
 }: HubPageProps) {
   const breadcrumbLd = generateBreadcrumbStructuredData(breadcrumb)
   const itemListLd = generateItemListStructuredData(
@@ -190,6 +193,27 @@ export default function HubPage({
                   ? `この条件の求人をすべて見る（全${totalCount}件）`
                   : "条件を絞り込んで探す"}
               </Link>
+            </div>
+          )}
+
+          {/* クロール用の求人リンク一覧（各求人詳細への内部リンクを深める / SEO） */}
+          {jobLinks.length > 0 && (
+            <div className="mt-10 border-t border-gray-100 pt-6">
+              <h3 className="text-sm font-semibold text-gray-500">
+                {summaryLabel}の求人一覧（{jobLinks.length}件）
+              </h3>
+              <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-1.5 text-sm">
+                {jobLinks.map((j) => (
+                  <li key={j.id} className="truncate">
+                    <Link
+                      href={`/job/${j.id}`}
+                      className="text-gray-600 hover:text-primary hover:underline"
+                    >
+                      {j.name}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </section>
