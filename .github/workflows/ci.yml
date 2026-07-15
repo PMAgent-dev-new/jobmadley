@@ -46,6 +46,9 @@ jobs:
       - name: Unit tests
         run: npm run test:catalog-feed
 
+      - name: Route tests (PII egress allowlist)
+        run: npm run test:unit
+
       - name: Build
         run: npm run build
         env:
