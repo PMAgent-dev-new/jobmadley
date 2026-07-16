@@ -7,6 +7,8 @@ name: catalog-feed
 #   - NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN
 #   - MICROCMS_API_KEY
 #   - BLOB_READ_WRITE_TOKEN   (Vercel の Storage → Blob で発行)
+#   - CATALOG_APPROVED_IMAGES_URL (ridejob-analytics の承認済み画像JSON API)
+#   - CATALOG_FEED_TOKEN          (上記APIの読み取りトークン)
 
 on:
   schedule:
@@ -29,7 +31,7 @@ permissions:
 jobs:
   generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
 
@@ -40,6 +42,11 @@ jobs:
 
       - run: npm ci
 
+      - name: Install Japanese fonts for catalog creatives
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+
       - name: Test catalog feed
         run: npm run test:catalog-feed
 
@@ -49,4 +56,6 @@ jobs:
           NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN: ${{ secrets.NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN }}
           MICROCMS_API_KEY: ${{ secrets.MICROCMS_API_KEY }}
           BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          CATALOG_APPROVED_IMAGES_URL: ${{ secrets.CATALOG_APPROVED_IMAGES_URL }}
+          CATALOG_FEED_TOKEN: ${{ secrets.CATALOG_FEED_TOKEN }}
           CATALOG_IMAGE_FORCE_REGENERATE: ${{ inputs.force_regenerate_images || 'false' }}
