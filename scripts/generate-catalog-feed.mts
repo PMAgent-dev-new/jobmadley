@@ -21,8 +21,13 @@ import { put } from '@vercel/blob'
 import { readFileSync } from 'node:fs'
 import {
   canonicalImageSource,
+  type CatalogImageSpec,
   prepareCatalogImages,
 } from './lib/catalog-images.mts'
+import {
+  classifyCatalogJob,
+  type CatalogCategory,
+} from './lib/catalog-classification.mts'
 import {
   catalogHtmlToText,
   sanitizeCatalogText,
@@ -40,6 +45,8 @@ const SERVICE_DOMAIN = process.env.NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN || proces
 const API_KEY = process.env.MICROCMS_API_KEY
 const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN
 const FORCE_REGENERATE_IMAGES = process.env.CATALOG_IMAGE_FORCE_REGENERATE === 'true'
+const APPROVED_IMAGES_URL = process.env.CATALOG_APPROVED_IMAGES_URL || ''
+const APPROVED_IMAGES_TOKEN = process.env.CATALOG_FEED_TOKEN || ''
 
 if (!SERVICE_DOMAIN || !API_KEY) {
   throw new Error('NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN（またはMICROCMS_SERVICE_DOMAIN）とMICROCMS_API_KEYが必要です')
@@ -80,17 +87,6 @@ type Job = {
 }
 
 const hasResidualPictograph = (s: string): boolean => /\p{Extended_Pictographic}/u.test(s || '')
-
-// ===== 職種分類（product_tags[0] / custom_label_0。旧版と同一値: taxi/hire/dispatch/mechanic/other） =====
-function classify(title: string, desc: string): string {
-  const t = String(title || '')
-  if (/タクシー\s*(ドライバー|乗務員|運転手)|乗務員/.test(t)) return 'taxi'
-  if (/ハイヤー/.test(t)) return 'hire'
-  if (/運行管理|配車(係|オペレーター|担当)/.test(t)) return 'dispatch'
-  if (/整備士|メカニック|整備|板金|フロントスタッフ|サービス(エンジニア|スタッフ)/.test(t)) return 'mechanic'
-  if (/タクシー\s*(ドライバー|乗務員|運転手)/.test(String(desc || ''))) return 'taxi'
-  return 'other'
-}
 
 // ===== 給与 =====
 const WAGE_UNIT_MAP: Record<string, 'HOUR' | 'DAY' | 'WEEK' | 'MONTH' | 'YEAR'> = {
@@ -224,20 +220,80 @@ function buildDescriptionText(job: Job, region: string, locality: string): strin
 }
 
 // ===== 画像 =====
-// 求人元画像には企業横断で使えない給与・休日等の訴求が焼き込まれているため、
-// カタログでは内容不一致を起こさない職種別の汎用写真に統一する。
+// 遷移先画像を参照して生成・承認された求人別写真を使い、正確な条件を下部パネルに表示する。
+// 承認画像がない場合は安全な職種写真へ縮退するが、最終画像は求人条件ごとに生成する。
 const SAFE_DRIVER_IMAGE_SOURCE = 'https://ridejob.jp/images/taxi.png'
 const SAFE_MECHANIC_IMAGE_SOURCE =
   'https://images.microcms-assets.io/assets/d8be402905d044ddbce7c2cde4918238/767a5eca263545c29beda317671745f0/1756890266438.jpg'
 
-function imageSource(job: Job): string {
-  const title = job.jobName ?? job.title ?? ''
-  const category = classify(title, job.descriptionWork ?? '')
+function fallbackImageSource(category: CatalogCategory): string {
   if (category === 'mechanic') return canonicalImageSource(SAFE_MECHANIC_IMAGE_SOURCE)
   if (category === 'taxi' || category === 'hire' || category === 'dispatch') {
     return canonicalImageSource(SAFE_DRIVER_IMAGE_SOURCE)
   }
   return ''
+}
+
+function jobImageSource(job: Job): string {
+  const source = canonicalImageSource(job.images?.[0]?.url || job.imageUrl || '')
+  if (!source || /\/OGP\.png|default|placeholder/i.test(source)) return ''
+  return source
+}
+
+type CatalogImagePlan = {
+  spec: CatalogImageSpec
+  sourceKind: string
+  referenceSourceUrl: string
+}
+
+function buildCatalogImagePlan(job: Job, approvedImages: Map<string, string>): CatalogImagePlan | null {
+  const category = classifyCatalogJob(job)
+  if (category === 'other') return null
+  const fallbackSourceUrl = fallbackImageSource(category)
+  const approvedSourceUrl = approvedImages.get(job.id) || ''
+  const sourceUrl = approvedSourceUrl || fallbackSourceUrl
+  if (!sourceUrl) return null
+
+  const parsed = parseAddressPrefMuni(job.addressPrefMuni)
+  const region = job.prefecture?.region ?? parsed.region ?? ''
+  const locality = job.municipality?.name ?? parsed.locality ?? ''
+  return {
+    spec: {
+      id: job.id,
+      sourceUrl,
+      fallbackSourceUrl,
+      category,
+      title: job.jobName ?? job.title ?? '求人情報',
+      salary: salaryLabel(job),
+      location: `${region}${locality}`.trim(),
+      employmentType: job.employmentType?.[0] ?? '',
+    },
+    sourceKind: approvedSourceUrl ? '承認済み求人別生成画像' : '求人別条件パネル（生成画像承認待ち）',
+    referenceSourceUrl: jobImageSource(job),
+  }
+}
+
+async function fetchApprovedImages(): Promise<Map<string, string>> {
+  if (!APPROVED_IMAGES_URL) return new Map()
+  try {
+    const url = new URL(APPROVED_IMAGES_URL)
+    url.searchParams.set('format', 'json')
+    if (APPROVED_IMAGES_TOKEN) url.searchParams.set('token', APPROVED_IMAGES_TOKEN)
+    const response = await fetch(url, { signal: AbortSignal.timeout(30_000) })
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    const payload = await response.json() as { items?: Array<{ job_id?: string; image_url?: string }> }
+    const images = new Map<string, string>()
+    for (const item of payload.items || []) {
+      const id = String(item.job_id || '').trim()
+      const imageUrl = canonicalImageSource(item.image_url || '')
+      if (id && imageUrl) images.set(id, imageUrl)
+    }
+    console.log(`[catalog-image] approved=${images.size}`)
+    return images
+  } catch (error) {
+    console.warn(`[catalog-image] 承認済み画像APIを取得できないため安全な求人別フォールバックを使用: ${error instanceof Error ? error.message : 'unknown error'}`)
+    return new Map()
+  }
 }
 
 // Blob未設定のローカル実行だけで使う縮退URL。本番Actionでは必ず再レンダリング済みBlobを使う。
@@ -269,13 +325,18 @@ async function fetchAllJobs(): Promise<Job[]> {
 }
 
 // ===== 1求人 → 1行（対象外は null で除外） =====
-function toRow(job: Job, generatedImages: Map<string, string>): Record<string, string> | null {
+function toRow(
+  job: Job,
+  generatedImages: Map<string, string>,
+  imagePlans: Map<string, CatalogImagePlan>,
+): Record<string, string> | null {
   const titleRaw = job.jobName ?? job.title ?? ''
-  const cat = classify(titleRaw, job.descriptionWork ?? '')
+  const cat = classifyCatalogJob(job)
   if (cat === 'other') return null // ドライバー系以外は広告対象外
 
-  const source = imageSource(job)
-  const img = generatedImages.get(source) || (!BLOB_TOKEN ? legacyImageLink(source) : '')
+  const imagePlan = imagePlans.get(job.id)
+  if (!imagePlan) return null
+  const img = generatedImages.get(job.id) || (!BLOB_TOKEN ? legacyImageLink(imagePlan.spec.sourceUrl) : '')
   if (!img) return null // 画像なしは配信不可
 
   const parsed = parseAddressPrefMuni(job.addressPrefMuni)
@@ -315,6 +376,9 @@ function toRow(job: Job, generatedImages: Map<string, string>): Record<string, s
     'custom_label_1': job.employmentType?.[0] ?? '', // 雇用形態
     'custom_label_2': region, // 都道府県
     'custom_label_3': salaryBand(job), // 給与帯
+    '_image_source': imagePlan.sourceKind,
+    '_reference_image_url': imagePlan.referenceSourceUrl,
+    '_source_image_url': imagePlan.spec.sourceUrl,
   }
 }
 
@@ -337,7 +401,8 @@ function toTSV(rows: Record<string, string>[]): string {
 // 本フィードは説明文を全文含み8MB超→IMPORTDATAのサイズ上限で読めないため、
 // 説明を先頭120字に切り、確認に必要な列だけを日本語ヘッダで出力（1MB未満）。
 const REVIEW_HEADERS = [
-  'id', '職種', '雇用形態', '県', '給与帯', 'タイトル', '会社', '市区町村', '在庫', '画像URL', 'リンク', '説明(先頭120字)',
+  'id', '職種', '雇用形態', '県', '給与帯', 'タイトル', '会社', '市区町村', '在庫',
+  '画像生成方式', '遷移先参照画像URL', '生成元画像URL', '画像URL', 'リンク', '説明(先頭120字)',
 ] as const
 
 function toReviewTSV(rows: Record<string, string>[]): string {
@@ -354,6 +419,9 @@ function toReviewTSV(rows: Record<string, string>[]): string {
       r['brand'],
       r['address.city'],
       r['availability'],
+      r['_image_source'],
+      r['_reference_image_url'],
+      r['_source_image_url'],
       r['image_link'],
       r['link'],
       clip(r['description'], 120),
@@ -365,12 +433,13 @@ function toReviewTSV(rows: Record<string, string>[]): string {
 // ===== main =====
 async function main() {
   const jobs = await fetchAllJobs()
-  const targetJobs = jobs.filter((job) => {
-    const title = job.jobName ?? job.title ?? ''
-    return classify(title, job.descriptionWork ?? '') !== 'other' && imageSource(job)
-  })
+  const approvedImages = await fetchApprovedImages()
+  const plans = jobs
+    .map((job) => buildCatalogImagePlan(job, approvedImages))
+    .filter((plan): plan is CatalogImagePlan => plan !== null)
+  const imagePlans = new Map(plans.map((plan) => [plan.spec.id, plan]))
   const generatedImages = BLOB_TOKEN
-    ? await prepareCatalogImages(targetJobs.map(imageSource), {
+    ? await prepareCatalogImages(plans.map((plan) => plan.spec), {
         token: BLOB_TOKEN,
         force: FORCE_REGENERATE_IMAGES,
         concurrency: 4,
@@ -380,7 +449,9 @@ async function main() {
     console.warn('[catalog-image] BLOB_READ_WRITE_TOKEN未設定のため、ローカル実行は従来のCDN変換URLを使用します')
   }
 
-  const rows = jobs.map((job) => toRow(job, generatedImages)).filter((r): r is Record<string, string> => r !== null)
+  const rows = jobs
+    .map((job) => toRow(job, generatedImages, imagePlans))
+    .filter((r): r is Record<string, string> => r !== null)
   const tsv = toTSV(rows)
   const reviewTsv = toReviewTSV(rows)
   const excluded = jobs.length - rows.length
