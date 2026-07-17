@@ -69,5 +69,6 @@ jobs:
           CATALOG_GENERATE_API_URL: ${{ secrets.CATALOG_GENERATE_API_URL }}
           CATALOG_GENERATE_TOKEN: ${{ secrets.CATALOG_GENERATE_TOKEN }}
           CATALOG_IMAGE_GENERATION_LIMIT: '10'
-          CATALOG_IMAGE_GENERATION_BATCH_SIZE: '5'
+          # The API generates sequentially and has a 300-second production runtime cap.
+          CATALOG_IMAGE_GENERATION_BATCH_SIZE: '1'
           CATALOG_IMAGE_GENERATION_QUALITY: medium
