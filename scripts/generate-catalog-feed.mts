@@ -32,6 +32,13 @@ import {
   catalogHtmlToText,
   sanitizeCatalogText,
 } from './lib/catalog-text.mts'
+import {
+  buildCatalogDescription,
+  buildCatalogTitle,
+  catalogRoleLabel,
+  validateCatalogCopy,
+  type CatalogCopyInput,
+} from './lib/catalog-copy.mts'
 
 // 市区町村→[緯度, 経度]（国土地理院ジオコーディングで事前生成した静的データ）。
 // Meta の住所検証は「有効な緯度経度 または 国+市町村」を要求するため、
@@ -47,6 +54,7 @@ const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN
 const FORCE_REGENERATE_IMAGES = process.env.CATALOG_IMAGE_FORCE_REGENERATE === 'true'
 const APPROVED_IMAGES_URL = process.env.CATALOG_APPROVED_IMAGES_URL || ''
 const APPROVED_IMAGES_TOKEN = process.env.CATALOG_FEED_TOKEN || ''
+const ALLOW_GENERIC_IMAGE_FALLBACK = process.env.CATALOG_ALLOW_GENERIC_IMAGE_FALLBACK === 'true'
 
 if (!SERVICE_DOMAIN || !API_KEY) {
   throw new Error('NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN（またはMICROCMS_SERVICE_DOMAIN）とMICROCMS_API_KEYが必要です')
@@ -190,33 +198,31 @@ function salaryLabel(job: Job): string {
 }
 
 function buildDescriptionText(job: Job, region: string, locality: string): string {
-  const summary = [salaryLabel(job), job.employmentType?.[0] ?? '', `${region}${locality}`.trim()]
-    .filter(Boolean)
-    .join('｜')
-  const sections: Array<[string, string | undefined]> = [
-    ['', job.descriptionWork], // 先頭は見出し無し（「仕事内容」ラベルは冗長のため出さない）
-    ['アピールポイント', job.descriptionAppeal],
-    ['求める人物像', job.descriptionPerson],
-    ['給与', job.salaryNote],
-    ['待遇・福利厚生', job.descriptionBenefits],
-    ['勤務時間', job.workHours],
-    ['休日・休暇', job.holidays],
-    ['アクセス', job.access],
-    ['その他', job.descriptionOther],
-  ]
-  const parts: string[] = []
-  if (summary) parts.push(summary)
-  for (const [label, body] of sections) {
-    if (!body || !body.trim()) continue
-    const text = catalogHtmlToText(body)
-    if (!text) continue
-    parts.push(label ? `【${label}】\n${text}` : text)
+  const category = classifyCatalogJob(job)
+  return buildCatalogDescription(toCatalogCopyInput(job, category, region, locality))
+}
+
+function toCatalogCopyInput(
+  job: Job,
+  category: CatalogCategory,
+  region: string,
+  locality: string,
+): CatalogCopyInput {
+  return {
+    category,
+    sourceTitle: job.jobName ?? job.title ?? '',
+    companyName: job.companyName,
+    salary: salaryLabel(job),
+    employmentType: job.employmentType?.[0] ?? '',
+    region,
+    locality,
+    descriptionWork: job.descriptionWork,
+    descriptionAppeal: job.descriptionAppeal,
+    descriptionPerson: job.descriptionPerson,
+    descriptionBenefits: job.descriptionBenefits,
+    workHours: job.workHours,
+    holidays: job.holidays,
   }
-  if (parts.length === (summary ? 1 : 0)) {
-    const fallback = catalogHtmlToText(job.descriptionWork ?? job.descriptionAppeal ?? job.title ?? '')
-    if (fallback) parts.push(fallback)
-  }
-  return parts.join('\n\n')
 }
 
 // ===== 画像 =====
@@ -249,27 +255,37 @@ type CatalogImagePlan = {
 function buildCatalogImagePlan(job: Job, approvedImages: Map<string, string>): CatalogImagePlan | null {
   const category = classifyCatalogJob(job)
   if (category === 'other') return null
-  const fallbackSourceUrl = fallbackImageSource(category)
-  const approvedSourceUrl = approvedImages.get(job.id) || ''
-  const sourceUrl = approvedSourceUrl || fallbackSourceUrl
-  if (!sourceUrl) return null
-
   const parsed = parseAddressPrefMuni(job.addressPrefMuni)
   const region = job.prefecture?.region ?? parsed.region ?? ''
   const locality = job.municipality?.name ?? parsed.locality ?? ''
+  const copyInput = toCatalogCopyInput(job, category, region, locality)
+  const fallbackSourceUrl = fallbackImageSource(category)
+  const approvedSourceUrl = approvedImages.get(job.id) || ''
+  const referenceSourceUrl = jobImageSource(job)
+  const sourceUrl = approvedSourceUrl || referenceSourceUrl || (ALLOW_GENERIC_IMAGE_FALLBACK ? fallbackSourceUrl : '')
+  if (!sourceUrl) return null
+
   return {
     spec: {
       id: job.id,
       sourceUrl,
-      fallbackSourceUrl,
+      fallbackSourceUrl: approvedSourceUrl && referenceSourceUrl
+        ? referenceSourceUrl
+        : (ALLOW_GENERIC_IMAGE_FALLBACK ? fallbackSourceUrl : undefined),
       category,
-      title: job.jobName ?? job.title ?? '求人情報',
+      roleLabel: catalogRoleLabel(copyInput),
+      title: buildCatalogTitle(copyInput),
+      company: job.companyName || '勤務先企業',
       salary: salaryLabel(job),
       location: `${region}${locality}`.trim(),
       employmentType: job.employmentType?.[0] ?? '',
     },
-    sourceKind: approvedSourceUrl ? '承認済み求人別生成画像' : '求人別条件パネル（生成画像承認待ち）',
-    referenceSourceUrl: jobImageSource(job),
+    sourceKind: approvedSourceUrl
+      ? '承認済み求人別生成画像'
+      : referenceSourceUrl
+        ? '求人詳細ページ画像'
+        : '汎用職種画像（緊急縮退）',
+    referenceSourceUrl,
   }
 }
 
@@ -291,14 +307,9 @@ async function fetchApprovedImages(): Promise<Map<string, string>> {
     console.log(`[catalog-image] approved=${images.size}`)
     return images
   } catch (error) {
-    console.warn(`[catalog-image] 承認済み画像APIを取得できないため安全な求人別フォールバックを使用: ${error instanceof Error ? error.message : 'unknown error'}`)
+    console.warn(`[catalog-image] 承認済み画像APIを取得できないため求人詳細ページ画像を使用: ${error instanceof Error ? error.message : 'unknown error'}`)
     return new Map()
   }
-}
-
-// Blob未設定のローカル実行だけで使う縮退URL。本番Actionでは必ず再レンダリング済みBlobを使う。
-function legacyImageLink(source: string): string {
-  return source + '?fm=jpg&w=1080&h=1080&fit=fill&fill=solid&fill-color=FFFFFF&q=80'
 }
 
 // ===== フィード列 =====
@@ -330,13 +341,12 @@ function toRow(
   generatedImages: Map<string, string>,
   imagePlans: Map<string, CatalogImagePlan>,
 ): Record<string, string> | null {
-  const titleRaw = job.jobName ?? job.title ?? ''
   const cat = classifyCatalogJob(job)
   if (cat === 'other') return null // ドライバー系以外は広告対象外
 
   const imagePlan = imagePlans.get(job.id)
   if (!imagePlan) return null
-  const img = generatedImages.get(job.id) || (!BLOB_TOKEN ? legacyImageLink(imagePlan.spec.sourceUrl) : '')
+  const img = generatedImages.get(job.id) || (!BLOB_TOKEN ? imagePlan.spec.sourceUrl : '')
   if (!img) return null // 画像なしは配信不可
 
   const parsed = parseAddressPrefMuni(job.addressPrefMuni)
@@ -347,16 +357,19 @@ function toRow(
 
   const descSrc = buildDescriptionText(job, region, locality)
   const desc = sanitizeCatalogText(descSrc)
-  const removalRate = 1 - desc.clean.length / Math.max(1, descSrc.length)
-  const dropCount = desc.flags.filter((f) => f.startsWith('[DROP]')).length
-  if (removalRate > 0.35 || desc.clean.length < 120 || dropCount >= 3 || hasResidualPictograph(desc.clean)) return null
+  if (hasResidualPictograph(desc.clean)) return null
 
-  const titleS = sanitizeCatalogText(`${titleRaw}${locality ? `（${locality}）` : ''}`)
+  const titleS = sanitizeCatalogText(buildCatalogTitle(toCatalogCopyInput(job, cat, region, locality)))
+  const copyIssues = validateCatalogCopy(titleS.clean, desc.clean)
+  if (copyIssues.length) {
+    console.warn(`[catalog-copy] 配信保留: ${job.id} (${copyIssues.join(', ')})`)
+    return null
+  }
 
   return {
     id: job.id,
-    title: clip(titleS.clean, 65),
-    description: clip(desc.clean, 9999),
+    title: titleS.clean,
+    description: desc.clean,
     availability: 'in stock',
     condition: 'new',
     price: '1 JPY', // 名目（価格オーバーレイOFF前提。給与は description / custom_label_3 に格納）
@@ -402,7 +415,8 @@ function toTSV(rows: Record<string, string>[]): string {
 // 説明を先頭120字に切り、確認に必要な列だけを日本語ヘッダで出力（1MB未満）。
 const REVIEW_HEADERS = [
   'id', '職種', '雇用形態', '県', '給与帯', 'タイトル', '会社', '市区町村', '在庫',
-  '画像生成方式', '遷移先参照画像URL', '生成元画像URL', '画像URL', 'リンク', '説明(先頭120字)',
+  '画像生成方式', '遷移先参照画像URL', '生成元画像URL', '画像URL', 'リンク',
+  'タイトル文字数', '説明文字数', '説明(先頭120字)',
 ] as const
 
 function toReviewTSV(rows: Record<string, string>[]): string {
@@ -424,20 +438,70 @@ function toReviewTSV(rows: Record<string, string>[]): string {
       r['_source_image_url'],
       r['image_link'],
       r['link'],
+      String(r['title'].length),
+      String(r['description'].length),
       clip(r['description'], 120),
     ].map(esc).join('\t'))
   }
   return lines.join('\n')
 }
 
+function toImageGenerationQueueItem(job: Job, category: CatalogCategory, reason: string) {
+  const parsed = parseAddressPrefMuni(job.addressPrefMuni)
+  const region = job.prefecture?.region ?? parsed.region ?? ''
+  const locality = job.municipality?.name ?? parsed.locality ?? ''
+  return {
+    job_id: job.id,
+    title: buildCatalogTitle(toCatalogCopyInput(job, category, region, locality)),
+    category: catalogRoleLabel({ category, sourceTitle: job.jobName ?? job.title ?? '' }),
+    location: `${region}${locality}`.trim(),
+    salary: salaryLabel(job),
+    appeal: catalogHtmlToText(job.descriptionAppeal || '').slice(0, 600),
+    company: job.companyName || '',
+    employment_type: job.employmentType?.[0] ?? '',
+    source_url: `https://ridejob.jp/job/${job.id}`,
+    source_image_url: jobImageSource(job),
+    reason,
+  }
+}
+
 // ===== main =====
 async function main() {
   const jobs = await fetchAllJobs()
   const approvedImages = await fetchApprovedImages()
-  const plans = jobs
+  const candidatePlans = jobs
     .map((job) => buildCatalogImagePlan(job, approvedImages))
     .filter((plan): plan is CatalogImagePlan => plan !== null)
+  const referenceSourceCounts = new Map<string, number>()
+  for (const plan of candidatePlans) {
+    if (plan.sourceKind !== '求人詳細ページ画像') continue
+    referenceSourceCounts.set(plan.spec.sourceUrl, (referenceSourceCounts.get(plan.spec.sourceUrl) || 0) + 1)
+  }
+  const duplicateReferenceSources = new Set(
+    [...referenceSourceCounts.entries()]
+      .filter(([, count]) => count > 1)
+      .map(([source]) => source),
+  )
+  // 求人ページ自身が同じ画像を使っている場合は、ページとの整合性を優先して一旦配信対象に残す。
+  // 同時に生成キューへ送り、承認済み求人別画像へ段階的に置き換える。
+  const plans = candidatePlans
   const imagePlans = new Map(plans.map((plan) => [plan.spec.id, plan]))
+  const candidatePlanById = new Map(candidatePlans.map((plan) => [plan.spec.id, plan]))
+  const imageGenerationQueue = jobs.flatMap((job) => {
+    const category = classifyCatalogJob(job)
+    if (category === 'other') return []
+    const candidate = candidatePlanById.get(job.id)
+    const reason = !candidate
+      ? 'missing_job_specific_image'
+      : candidate.sourceKind === '求人詳細ページ画像'
+      && duplicateReferenceSources.has(candidate.spec.sourceUrl)
+      ? 'duplicate_reference_image'
+      : candidate.sourceKind === '汎用職種画像（緊急縮退）'
+        ? 'generic_fallback_image'
+        : ''
+    if (!reason) return []
+    return [toImageGenerationQueueItem(job, category, reason)]
+  })
   const generatedImages = BLOB_TOKEN
     ? await prepareCatalogImages(plans.map((plan) => plan.spec), {
         token: BLOB_TOKEN,
@@ -445,8 +509,22 @@ async function main() {
         concurrency: 4,
       })
     : new Map<string, string>()
+  if (BLOB_TOKEN) {
+    const queuedIds = new Set(imageGenerationQueue.map((item) => item.job_id))
+    const jobsById = new Map(jobs.map((job) => [job.id, job]))
+    for (const plan of plans) {
+      if (generatedImages.has(plan.spec.id) || queuedIds.has(plan.spec.id)) continue
+      const job = jobsById.get(plan.spec.id)
+      if (!job) continue
+      imageGenerationQueue.push(toImageGenerationQueueItem(job, classifyCatalogJob(job), 'image_fetch_or_render_failed'))
+      queuedIds.add(job.id)
+    }
+  }
   if (!BLOB_TOKEN) {
-    console.warn('[catalog-image] BLOB_READ_WRITE_TOKEN未設定のため、ローカル実行は従来のCDN変換URLを使用します')
+    console.warn('[catalog-image] BLOB_READ_WRITE_TOKEN未設定のため、ローカル実行は生成元URLを使用します')
+  }
+  if (imageGenerationQueue.length) {
+    console.warn(`[catalog-image] 求人別画像の生成・承認待ち=${imageGenerationQueue.length}件`)
   }
 
   const rows = jobs
@@ -455,9 +533,40 @@ async function main() {
   const tsv = toTSV(rows)
   const reviewTsv = toReviewTSV(rows)
   const excluded = jobs.length - rows.length
+  const imageSourceCounts = rows.reduce<Record<string, number>>((counts, row) => {
+    counts[row['_image_source']] = (counts[row['_image_source']] || 0) + 1
+    return counts
+  }, {})
+  const qualityReport = JSON.stringify({
+    generated_at: new Date().toISOString(),
+    fetched_jobs: jobs.length,
+    included_products: rows.length,
+    excluded_products: excluded,
+    image_source_counts: imageSourceCounts,
+    image_generation_queue_count: imageGenerationQueue.length,
+    duplicate_reference_source_count: duplicateReferenceSources.size,
+    copy_rules: {
+      title_max_length: 42,
+      description_min_length: 100,
+      description_max_length: 700,
+      agency_disclosure_required: true,
+      ambiguous_employer_voice_allowed: false,
+      universal_guarantee_copy_allowed: false,
+    },
+    generic_image_fallback_enabled: ALLOW_GENERIC_IMAGE_FALLBACK,
+  }, null, 2)
+  const imageQueueReport = JSON.stringify({
+    generated_at: new Date().toISOString(),
+    jobs: imageGenerationQueue,
+  }, null, 2)
+  if (!ALLOW_GENERIC_IMAGE_FALLBACK && rows.some((row) => row['_image_source'].startsWith('汎用職種画像'))) {
+    throw new Error('求人固有でない汎用職種画像がフィードに含まれています')
+  }
   console.log(`[catalog-feed] 取得=${jobs.length}件 / 収録=${rows.length}件 / 除外=${excluded}件`)
 
   if (BLOB_TOKEN) {
+    const fs = await import('node:fs/promises')
+    await fs.writeFile('catalog-image-generation-queue.json', imageQueueReport, 'utf-8')
     const blobOpts = {
       access: 'public' as const,
       addRandomSuffix: false, // 固定URL
@@ -469,11 +578,32 @@ async function main() {
     console.log(`[catalog-feed] published: ${url}`)
     const review = await put('catalog/ridejob-feed-review.tsv', reviewTsv, blobOpts) // Sheets確認用（軽量）
     console.log(`[catalog-feed] published(review): ${review.url}`)
+    const jsonOpts = {
+      access: 'public' as const,
+      addRandomSuffix: false,
+      allowOverwrite: true,
+      contentType: 'application/json; charset=utf-8',
+      token: BLOB_TOKEN,
+    }
+    const quality = await put('catalog/ridejob-feed-quality.json', qualityReport, jsonOpts)
+    console.log(`[catalog-feed] published(quality): ${quality.url}`)
+    const queue = await put(
+      'catalog/ridejob-image-generation-queue.json',
+      imageQueueReport,
+      jsonOpts,
+    )
+    console.log(`[catalog-feed] published(image-queue): ${queue.url}`)
   } else {
     const fs = await import('node:fs/promises')
     await fs.writeFile('catalog-feed.tsv', tsv, 'utf-8')
     await fs.writeFile('catalog-feed-review.tsv', reviewTsv, 'utf-8')
-    console.log('[catalog-feed] BLOB_READ_WRITE_TOKEN 未設定 → ローカル出力(catalog-feed.tsv / catalog-feed-review.tsv)')
+    await fs.writeFile('catalog-feed-quality.json', qualityReport, 'utf-8')
+    await fs.writeFile(
+      'catalog-image-generation-queue.json',
+      imageQueueReport,
+      'utf-8',
+    )
+    console.log('[catalog-feed] BLOB_READ_WRITE_TOKEN 未設定 → ローカル出力(catalog-feed.tsv / catalog-feed-review.tsv / catalog-feed-quality.json / catalog-image-generation-queue.json)')
   }
 }
 

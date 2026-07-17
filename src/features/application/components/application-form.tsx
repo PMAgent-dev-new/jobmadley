@@ -22,12 +22,14 @@ import { genEventId, trackMeta } from "@/shared/lib/meta-pixel"
 import { ApplicantFields } from "@/features/application/components/applicant-fields"
 import { BirthDateSelect } from "@/features/application/components/birth-date-select"
 import { ConsentSection } from "@/features/application/components/consent-section"
+import { isMetaCatalogJob } from "@/shared/lib/catalog-eligibility"
 
 export interface ApplicationFormProps {
   job: JobDetail | null
 }
 
 export default function ApplicationForm({ job }: ApplicationFormProps) {
+  const catalogEligible = job ? isMetaCatalogJob(job) : false
   const {
     register,
     handleSubmit,
@@ -47,13 +49,13 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
   useEffect(() => {
     if (job?.id) {
       trackMeta("AddToCart", {
-        contentIds: [job.id],
+        contentIds: catalogEligible ? [job.id] : undefined,
         contentName: job.jobName ?? undefined,
         value: 0,
         currency: "JPY",
       })
     }
-  }, [job?.id, job?.jobName])
+  }, [catalogEligible, job?.id, job?.jobName])
 
   const onSubmit = async (data: ApplicationFormValues) => {
     if (isLoading) return
@@ -84,6 +86,7 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
         email: data.email,
         companyName: job?.companyName || "",
         jobName: job?.jobName || "",
+        jobCategoryName: job?.jobCategory?.name || "",
         jobUrl,
         applicationSource,
         utmSource,
@@ -110,7 +113,7 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
       trackMeta(
         "Lead",
         {
-          contentIds: job?.id ? [job.id] : undefined,
+          contentIds: catalogEligible && job?.id ? [job.id] : undefined,
           contentName: job?.jobName ?? undefined,
           value: 0,
           currency: "JPY",

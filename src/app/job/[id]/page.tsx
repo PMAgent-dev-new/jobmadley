@@ -14,6 +14,7 @@ import RelatedJobs from "../components/related-jobs"
 import { getMediaArticles } from "@/features/media/api"
 import { generateBreadcrumbStructuredData, generateJobMetadata, generateJobPostingStructuredData } from "@/shared/lib/metadata"
 import JobViewTracker from "../components/job-view-tracker"
+import { isMetaCatalogJob } from "@/shared/lib/catalog-eligibility"
 
 interface JobPageProps {
   params: Promise<{ id: string }>
@@ -115,7 +116,11 @@ export default async function JobPage({ params }: JobPageProps) {
 
   return (
     <div className="min-h-screen bg-white">
-      <JobViewTracker id={job.id} name={job.jobName ?? job.title ?? undefined} />
+      <JobViewTracker
+        id={job.id}
+        name={job.jobName ?? job.title ?? undefined}
+        catalogEligible={isMetaCatalogJob(job)}
+      />
       {/* companyName の無い求人は markup を出さない（generateJobPostingStructuredData が null を返す） */}
       {jobPostingStructuredData && (
         <script

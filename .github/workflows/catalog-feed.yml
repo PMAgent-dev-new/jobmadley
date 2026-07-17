@@ -9,6 +9,8 @@ name: catalog-feed
 #   - BLOB_READ_WRITE_TOKEN   (Vercel の Storage → Blob で発行)
 #   - CATALOG_APPROVED_IMAGES_URL (ridejob-analytics の承認済み画像JSON API)
 #   - CATALOG_FEED_TOKEN          (上記APIの読み取りトークン)
+#   - CATALOG_GENERATE_API_URL    (ridejob-analytics の /api/ai/catalog-generate)
+#   - CATALOG_GENERATE_TOKEN      (上記APIのBearer token)
 
 on:
   schedule:
@@ -59,3 +61,13 @@ jobs:
           CATALOG_APPROVED_IMAGES_URL: ${{ secrets.CATALOG_APPROVED_IMAGES_URL }}
           CATALOG_FEED_TOKEN: ${{ secrets.CATALOG_FEED_TOKEN }}
           CATALOG_IMAGE_FORCE_REGENERATE: ${{ inputs.force_regenerate_images || 'false' }}
+          CATALOG_ALLOW_GENERIC_IMAGE_FALLBACK: 'false'
+
+      - name: Generate job-specific image candidates
+        run: npm run generate:catalog-image-candidates
+        env:
+          CATALOG_GENERATE_API_URL: ${{ secrets.CATALOG_GENERATE_API_URL }}
+          CATALOG_GENERATE_TOKEN: ${{ secrets.CATALOG_GENERATE_TOKEN }}
+          CATALOG_IMAGE_GENERATION_LIMIT: '10'
+          CATALOG_IMAGE_GENERATION_BATCH_SIZE: '5'
+          CATALOG_IMAGE_GENERATION_QUALITY: medium

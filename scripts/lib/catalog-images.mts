@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import sharp from 'sharp'
 import { list, put } from '@vercel/blob'
 
-const IMAGE_VERSION = 'v4'
+const IMAGE_VERSION = 'v5'
 const IMAGE_PREFIX = `catalog/images/${IMAGE_VERSION}/`
 const OUTPUT_SIZE = 1080
 const PHOTO_HEIGHT = 720
@@ -14,7 +14,9 @@ export type CatalogImageSpec = {
   sourceUrl: string
   fallbackSourceUrl?: string
   category: string
+  roleLabel?: string
   title: string
+  company?: string
   salary?: string
   location?: string
   employmentType?: string
@@ -38,7 +40,9 @@ function normalizedSpec(spec: CatalogImageSpec): CatalogImageSpec {
     sourceUrl: canonicalImageSource(spec.sourceUrl),
     fallbackSourceUrl: canonicalImageSource(spec.fallbackSourceUrl || '') || undefined,
     category: String(spec.category || '').trim(),
+    roleLabel: String(spec.roleLabel || '').trim(),
     title: String(spec.title || '').trim(),
+    company: String(spec.company || '').trim(),
     salary: String(spec.salary || '').trim(),
     location: String(spec.location || '').trim(),
     employmentType: String(spec.employmentType || '').trim(),
@@ -108,10 +112,11 @@ function categoryLabel(category: string): string {
 function renderInfoPanel(spec: CatalogImageSpec): Buffer {
   const titleLines = wrapVisual(spec.title, 22, 2)
   const titleY = titleLines.length === 1 ? [164] : [127, 185]
-  const salary = truncateVisual(spec.salary || spec.employmentType || '条件は詳細ページへ', 17)
+  const salary = truncateVisual(spec.salary || spec.employmentType || '条件は詳細ページへ', 14)
+  const company = truncateVisual(spec.company || '勤務先は求人詳細へ', 31)
   const location = truncateVisual(
     [spec.location, spec.employmentType].filter(Boolean).join('　') || '勤務地は詳細ページへ',
-    22,
+    16,
   )
   const titleSvg = titleLines
     .map((line, index) => `<text x="48" y="${titleY[index]}" class="title">${escapeXml(line)}</text>`)
@@ -126,11 +131,12 @@ function renderInfoPanel(spec: CatalogImageSpec): Buffer {
       </style>
       <rect width="1080" height="360" fill="#ffffff"/>
       <rect width="1080" height="66" fill="#1f1fff"/>
-      <text x="48" y="45" font-size="29" font-weight="800" fill="#ffffff">${escapeXml(categoryLabel(spec.category))}</text>
+      <text x="48" y="45" font-size="29" font-weight="800" fill="#ffffff">${escapeXml(spec.roleLabel || categoryLabel(spec.category))}</text>
       <text x="1032" y="45" text-anchor="end" font-size="28" font-weight="900" font-style="italic" fill="#ffffff">RIDE JOB</text>
       ${titleSvg}
-      <text x="48" y="322" class="meta">${escapeXml(location)}</text>
-      <rect x="668" y="255" width="364" height="78" rx="6" fill="#ffdd2d"/>
+      <text x="48" y="232" font-size="27" font-weight="700" fill="#64748b">${escapeXml(company)}</text>
+      <text x="48" y="322" font-size="29" font-weight="700" fill="#334155">${escapeXml(location)}</text>
+      <rect x="638" y="255" width="394" height="78" rx="6" fill="#ffdd2d"/>
       <text x="1010" y="310" text-anchor="end" font-size="42" font-weight="900" fill="#0b2c69">${escapeXml(salary)}</text>
     </svg>
   `)
@@ -213,6 +219,7 @@ type PrepareOptions = {
   token: string
   force?: boolean
   concurrency?: number
+  failOnError?: boolean
 }
 
 /** 求人IDと表示条件ごとに広告画像を一度だけ生成し、永続Blob URLを返す。 */
@@ -238,6 +245,7 @@ export async function prepareCatalogImages(
   }
 
   let next = 0
+  const failures: Array<{ id: string; reason: string }> = []
   const sourceCache = new Map<string, Promise<Buffer>>()
   const fetchCachedSource = (url: string): Promise<Buffer> => {
     const cached = sourceCache.get(url)
@@ -252,30 +260,42 @@ export async function prepareCatalogImages(
       next += 1
       if (index >= pending.length) return
       const spec = pending[index]
-      let input: Buffer
       try {
-        input = await fetchCachedSource(spec.sourceUrl)
+        let input: Buffer
+        try {
+          input = await fetchCachedSource(spec.sourceUrl)
+        } catch (error) {
+          if (!spec.fallbackSourceUrl || spec.fallbackSourceUrl === spec.sourceUrl) throw error
+          console.warn(`[catalog-image] 承認画像を取得できないため求人詳細画像を使用: ${spec.id}`)
+          input = await fetchCachedSource(spec.fallbackSourceUrl)
+        }
+        const output = await renderCatalogCreative(input, spec)
+        const path = catalogImagePath(spec)
+        const blob = await put(path, output, {
+          access: 'public',
+          addRandomSuffix: false,
+          allowOverwrite: true,
+          contentType: 'image/jpeg',
+          token: options.token,
+        })
+        result.set(spec.id, blob.url)
+        console.log(`[catalog-image] generated ${index + 1}/${pending.length}: ${spec.id}`)
       } catch (error) {
-        if (!spec.fallbackSourceUrl || spec.fallbackSourceUrl === spec.sourceUrl) throw error
-        console.warn(`[catalog-image] 求人画像を取得できないため職種画像を使用: ${spec.id}`)
-        input = await fetchCachedSource(spec.fallbackSourceUrl)
+        const reason = error instanceof Error ? error.message : 'unknown error'
+        failures.push({ id: spec.id, reason })
+        console.warn(`[catalog-image] 求人別画像を生成できないため配信保留: ${spec.id} (${reason})`)
       }
-      const output = await renderCatalogCreative(input, spec)
-      const path = catalogImagePath(spec)
-      const blob = await put(path, output, {
-        access: 'public',
-        addRandomSuffix: false,
-        allowOverwrite: true,
-        contentType: 'image/jpeg',
-        token: options.token,
-      })
-      result.set(spec.id, blob.url)
-      console.log(`[catalog-image] generated ${index + 1}/${pending.length}: ${spec.id}`)
     }
   }
 
   const workerCount = Math.max(1, Math.min(options.concurrency ?? 4, pending.length || 1))
   await Promise.all(Array.from({ length: workerCount }, worker))
   console.log(`[catalog-image] jobs=${specs.length} / cached=${specs.length - pending.length} / generated=${pending.length}`)
+  if (failures.length) {
+    console.warn(`[catalog-image] held=${failures.length}`)
+    if (options.failOnError) {
+      throw new Error(`求人別画像の生成失敗: ${failures.slice(0, 5).map((failure) => `${failure.id}: ${failure.reason}`).join(' / ')}`)
+    }
+  }
   return result
 }
