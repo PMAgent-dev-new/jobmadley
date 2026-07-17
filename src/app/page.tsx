@@ -11,6 +11,7 @@ import MarqueeSection from "./components/marquee-section"
 import ValueStripSection from "./components/value-strip-section"
 import LatestJobsSection from "./components/latest-jobs-section"
 import MediaSection from "./components/media-section"
+import FeaturedCompaniesSection from "./components/featured-companies-section"
 import { getTags } from "@/features/master/tags"
 import PopularTagsSection from "@/features/master/components/popular-tags-section"
 import { getJobCategories } from "@/features/master/job-categories"
@@ -45,6 +46,7 @@ export default async function HomePage() {
       <RegionSearchSection prefectures={prefectures} countMap={countMap} />
       <PopularTagsSection tags={tags} />
       <JobCategoriesSection categories={jobCategories} />
+      <FeaturedCompaniesSection />
       <LatestJobsSection jobs={latestJobs} />
       <MediaSection
         companyArticles={companyArticles}

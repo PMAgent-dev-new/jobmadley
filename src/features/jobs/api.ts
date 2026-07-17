@@ -153,6 +153,34 @@ export const getJobsByCategoryIds = async (params: {
   return { contents: data.contents, totalCount: data.totalCount }
 }
 
+/**
+ * 企業名の部分一致語を OR で結び、企業・ブランド別ハブに掲載する求人を全件取得する。
+ * q（全文検索）では本文中の社名にも一致して別企業が混ざるため、companyName フィルターを使う。
+ */
+export const getJobsByCompanyTerms = async (terms: string[]): Promise<Job[]> => {
+  const normalizedTerms = [...new Set(terms.map((term) => term.trim()).filter(Boolean))]
+  if (normalizedTerms.length === 0) return []
+
+  const filters = normalizedTerms.map((term) => `companyName[contains]${term}`).join("[or]")
+  const jobs: Job[] = []
+  const limit = 100
+  let offset = 0
+
+  while (true) {
+    const data = await fetchList<Job>({
+      endpoint: "jobs",
+      queries: { limit, offset, depth: 1, orders: "-publishedAt", filters },
+      context: "getJobsByCompanyTerms",
+    })
+    // 企業名を非公開にした求人は企業ハブへ出さない。
+    jobs.push(...data.contents.filter((job) => !job.hideCompanyName))
+    offset += data.limit
+    if (offset >= data.totalCount) break
+  }
+
+  return jobs
+}
+
 /** 職種グループの傾向集計用に、該当求人「全件」を軽量フィールドで取得。 */
 export const getGroupJobsForStats = async (categoryIds: string[]): Promise<Job[]> => {
   if (categoryIds.length === 0) return []

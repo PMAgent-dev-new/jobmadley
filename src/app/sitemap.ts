@@ -11,6 +11,7 @@ import {
   withSlug,
   getHubData,
 } from "@/features/hub/lib/hub"
+import { FEATURED_COMPANIES, matchesFeaturedCompany } from "@/features/companies/data"
 
 /** 地域×職種ハブページ群のsitemapエントリを生成（生成対象＝件数しきい値以上の県×職種＋全県＋全職種） */
 const getHubRoutes = async (): Promise<MetadataRoute.Sitemap> => {
@@ -55,7 +56,7 @@ const getAllJobsForSitemap = async (): Promise<Job[]> => {
       queries: {
         limit: JOB_PAGE_SIZE,
         offset,
-        fields: "id,updatedAt,publishedAt",
+        fields: "id,companyName,hideCompanyName,updatedAt,publishedAt",
       },
     })
 
@@ -103,7 +104,28 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.7,
   }))
 
+  // 求人がある企業ページだけをsitemapへ含める。0件ページはページ側でもnoindex。
+  const companyRoutes: MetadataRoute.Sitemap = FEATURED_COMPANIES.flatMap((company) => {
+    const matchingJobs = jobs.filter(
+      (job) => !job.hideCompanyName && matchesFeaturedCompany(job.companyName, company),
+    )
+    if (matchingJobs.length === 0) return []
+
+    const latestTimestamp = matchingJobs.reduce((latest, job) => {
+      const value = job.updatedAt ?? job.publishedAt
+      if (!value) return latest
+      return Math.max(latest, new Date(value).getTime())
+    }, 0)
+
+    return [{
+      url: `${SITE_URL}/companies/${company.slug}`,
+      lastModified: latestTimestamp > 0 ? new Date(latestTimestamp) : undefined,
+      changeFrequency: "daily" as const,
+      priority: 0.7,
+    }]
+  })
+
   const hubRoutes = await getHubRoutes()
 
-  return [...staticRoutes, ...hubRoutes, ...jobRoutes]
+  return [...staticRoutes, ...hubRoutes, ...companyRoutes, ...jobRoutes]
 }

@@ -1,4 +1,5 @@
 import Link from "next/link"
+import Image from "next/image"
 import SiteHeader from "@/shared/components/site-header"
 import SiteFooter from "@/shared/components/site-footer"
 import JobCard from "@/features/jobs/components/job-card"
@@ -53,6 +54,8 @@ interface HubPageProps {
   relatedArticles?: HubArticleLink[]
   /** クロール用の求人リンク一覧（表示カードより広く各求人詳細へ内部リンクを張る / SEO内部リンク深化） */
   jobLinks?: Array<{ id: string; name: string }>
+  /** 企業ハブなどでH1の横に表示する識別画像。通常ハブでは省略。 */
+  heroImage?: { src: string; alt: string }
 }
 
 const jsonLd = (obj: unknown) => JSON.stringify(obj).replace(/</g, "\\u003c")
@@ -73,6 +76,7 @@ export default function HubPage({
   related = [],
   relatedArticles = [],
   jobLinks = [],
+  heroImage,
 }: HubPageProps) {
   const breadcrumbLd = generateBreadcrumbStructuredData(breadcrumb)
   const itemListLd = generateItemListStructuredData(
@@ -103,8 +107,27 @@ export default function HubPage({
           </ol>
         </nav>
 
-        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">{h1}</h1>
-        <p className="mt-3 text-gray-600 leading-relaxed">{lead}</p>
+        <div className={heroImage ? "flex flex-col gap-5 sm:flex-row sm:items-center" : undefined}>
+          {heroImage && (
+            <div className="flex h-24 w-full shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white p-4 sm:w-64">
+              <div className="relative h-16 w-full">
+                <Image
+                  src={heroImage.src}
+                  alt={heroImage.alt}
+                  fill
+                  sizes="(max-width: 640px) 100vw, 256px"
+                  className="object-contain"
+                  priority
+                />
+              </div>
+            </div>
+          )}
+          <div>
+            {heroImage && <p className="mb-1 text-sm font-semibold text-primary">企業から求人を探す</p>}
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">{h1}</h1>
+            <p className="mt-3 text-gray-600 leading-relaxed">{lead}</p>
+          </div>
+        </div>
 
         {/* 概要・傾向（実データ由来の一次情報） */}
         <section className="mt-8" aria-labelledby="hub-overview">
