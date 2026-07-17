@@ -6,6 +6,7 @@ import {
   CATALOG_DESCRIPTION_MAX_LENGTH,
   CATALOG_TITLE_MAX_LENGTH,
   PM_AGENT_DISCLOSURE,
+  catalogRoleKey,
   validateCatalogCopy,
 } from './catalog-copy.mts'
 
@@ -29,6 +30,27 @@ test('buildCatalogTitle distinguishes motorcycle and construction-equipment jobs
     buildCatalogTitle({ category: 'mechanic', sourceTitle: 'ショベル等の建機整備士', locality: '三次市' }),
     '建機・重機整備士（三次市）',
   )
+})
+
+test('buildCatalogTitle uses the source category for generic motorcycle service titles', () => {
+  const input = {
+    category: 'mechanic' as const,
+    sourceCategory: 'バイク整備士',
+    sourceTitle: 'バイクサービススタッフ / 未経験研修/寮月1000円',
+    locality: '宮崎市',
+  }
+  assert.equal(buildCatalogTitle(input), 'バイク整備士｜寮月1000円（宮崎市）')
+  assert.equal(catalogRoleKey(input), 'bike_mechanic')
+})
+
+test('buildCatalogTitle keeps the primary taxi role when hire is only a career path', () => {
+  const input = {
+    category: 'taxi' as const,
+    sourceTitle: 'タクシードライバー / 年収800万可/ハイヤーへキャリアアップ可',
+    locality: '平塚市',
+  }
+  assert.equal(buildCatalogTitle(input), 'タクシードライバー（平塚市）')
+  assert.equal(catalogRoleKey(input), 'taxi_driver')
 })
 
 test('buildCatalogDescription removes ambiguous voice, stale claims, Q&A, and shared boilerplate', () => {

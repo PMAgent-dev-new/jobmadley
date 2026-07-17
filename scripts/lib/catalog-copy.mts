@@ -11,6 +11,7 @@ export type CatalogCopyCategory = 'taxi' | 'hire' | 'dispatch' | 'mechanic' | 'o
 export type CatalogCopyInput = {
   category: CatalogCopyCategory
   sourceTitle: string
+  sourceCategory?: string
   companyName?: string
   salary?: string
   employmentType?: string
@@ -122,18 +123,57 @@ function compactSection(
   return normalizeWhitespace(selected.join(' '))
 }
 
-function occupationLabel(category: CatalogCopyCategory, sourceTitle: string): string {
+export type CatalogRole =
+  | 'taxi_driver'
+  | 'hire_driver'
+  | 'dispatch'
+  | 'car_mechanic'
+  | 'bike_mechanic'
+  | 'equipment_mechanic'
+  | 'bodywork'
+  | 'service_front'
+  | 'mechanic_instructor'
+  | 'other'
+
+function catalogRole(
+  category: CatalogCopyCategory,
+  sourceTitle: string,
+  sourceCategory = '',
+): { key: CatalogRole; label: string } {
   const title = String(sourceTitle || '')
-  if (/教員|講師/.test(title) && /整備/.test(title)) return '自動車整備教員'
-  if (/バイク|二輪/.test(title) && /整備|メカニック/.test(title)) return 'バイク整備士'
-  if (/建機|重機|ショベル|農機/.test(title) && /整備|メカニック|サービスエンジニア/.test(title)) return '建機・重機整備士'
-  if (/板金|鈑金|塗装/.test(title)) return '板金・塗装スタッフ'
-  if (/フロント|受付/.test(title) && /整備|工場|車検/.test(title)) return '整備工場フロント'
-  if (category === 'hire' || /ハイヤー/.test(title)) return 'ハイヤードライバー'
-  if (category === 'dispatch' || /運行管理|配車係|配車オペレーター/.test(title)) return '運行管理・配車'
-  if (category === 'taxi' || /タクシー|乗務員/.test(title)) return 'タクシードライバー'
-  if (category === 'mechanic' || /整備士|メカニック/.test(title)) return '自動車整備士'
-  return clipAtBoundary(title.replace(/[（(].*?[）)]/g, '').split(/[|｜/／]/)[0], 20) || '求人情報'
+
+  // 主分類を優先し、補足文の「ハイヤーへキャリアアップ」などで職種名を変えない。
+  if (category === 'hire') return { key: 'hire_driver', label: 'ハイヤードライバー' }
+  if (category === 'dispatch') return { key: 'dispatch', label: '運行管理・配車' }
+  if (category === 'taxi') return { key: 'taxi_driver', label: 'タクシードライバー' }
+
+  if (/教員|講師/.test(title) && /整備/.test(title)) {
+    return { key: 'mechanic_instructor', label: '自動車整備教員' }
+  }
+  if (
+    /バイク|二輪/.test(sourceCategory)
+    || (/バイク|二輪/.test(title) && /整備|メカニック|サービス(?:エンジニア|スタッフ)/.test(title))
+  ) {
+    return { key: 'bike_mechanic', label: 'バイク整備士' }
+  }
+  if (/建機|重機|ショベル|農機/.test(title) && /整備|メカニック|サービスエンジニア/.test(title)) {
+    return { key: 'equipment_mechanic', label: '建機・重機整備士' }
+  }
+  if (/板金|鈑金|塗装/.test(title)) return { key: 'bodywork', label: '板金・塗装スタッフ' }
+  if (/フロント|受付/.test(title) && /整備|工場|車検/.test(title)) {
+    return { key: 'service_front', label: '整備工場フロント' }
+  }
+  if (category === 'mechanic' || /整備士|メカニック/.test(title)) {
+    return { key: 'car_mechanic', label: '自動車整備士' }
+  }
+  return {
+    key: 'other',
+    label: clipAtBoundary(title.replace(/[（(].*?[）)]/g, '').split(/[|｜/／]/)[0], 20) || '求人情報',
+  }
+}
+
+function occupationLabel(category: CatalogCopyCategory, sourceTitle: string, sourceCategory = ''): string {
+  return catalogRole(category, sourceTitle, sourceCategory).label
 }
 
 function concreteAppeal(sourceTitle: string): string {
@@ -159,7 +199,7 @@ function concreteAppeal(sourceTitle: string): string {
 }
 
 export function buildCatalogTitle(input: CatalogCopyInput): string {
-  const occupation = occupationLabel(input.category, input.sourceTitle)
+  const occupation = occupationLabel(input.category, input.sourceTitle, input.sourceCategory)
   const appeal = concreteAppeal(input.sourceTitle)
   const location = input.locality ? `（${input.locality}）` : ''
   const withAppeal = `${occupation}${appeal ? `｜${appeal}` : ''}${location}`
@@ -197,7 +237,7 @@ export function buildCatalogDescription(
   const blocks: string[] = []
   if (summary) blocks.push(summary)
   addBlock(blocks, '勤務先', company)
-  addBlock(blocks, '仕事内容', work || occupationLabel(input.category, input.sourceTitle))
+  addBlock(blocks, '仕事内容', work || occupationLabel(input.category, input.sourceTitle, input.sourceCategory))
   addBlock(blocks, '特徴', appeal)
   addBlock(blocks, '応募条件', person)
   addBlock(blocks, '待遇', benefits)
@@ -236,6 +276,14 @@ export function validateCatalogCopy(title: string, description: string): string[
   return issues
 }
 
-export function catalogRoleLabel(input: Pick<CatalogCopyInput, 'category' | 'sourceTitle'>): string {
-  return occupationLabel(input.category, input.sourceTitle)
+export function catalogRoleLabel(
+  input: Pick<CatalogCopyInput, 'category' | 'sourceTitle' | 'sourceCategory'>,
+): string {
+  return occupationLabel(input.category, input.sourceTitle, input.sourceCategory)
+}
+
+export function catalogRoleKey(
+  input: Pick<CatalogCopyInput, 'category' | 'sourceTitle' | 'sourceCategory'>,
+): CatalogRole {
+  return catalogRole(input.category, input.sourceTitle, input.sourceCategory).key
 }
