@@ -40,7 +40,7 @@ test('buildCatalogDescription removes ambiguous voice, stale claims, Q&A, and sh
     employmentType: '正社員',
     region: '福島県',
     locality: '郡山市',
-    descriptionWork: '<p>当社では整備業務と受付業務を分業しています。あなたの経験を活かせます。</p><p>【Q1】大型車の経験は必要ですか？</p>',
+    descriptionWork: '<p>当社では整備業務と受付業務を分業しています。あなたの経験を活かせます。</p><p>【Q1】大型車の経験は必要ですか？</p><p>いいえ。乗用車の整備経験があれば応募できます。</p><p>＼ 経験を活かせる環境 ／ はい、先輩教員が指導方法を説明します。</p>',
     descriptionAppeal: '<p>2024年度の賞与実績は5.2ヶ月です。</p><p>2〜4名のチームで整備します。</p>',
     descriptionPerson: '<p>二級自動車整備士資格をお持ちの方</p>',
     descriptionBenefits: '<p>社会保険完備。資格取得支援制度あり。</p>',
@@ -52,6 +52,11 @@ test('buildCatalogDescription removes ambiguous voice, stale claims, Q&A, and sh
   assert.equal(description.includes('勤務先企業では整備業務と受付業務を分業しています。'), true)
   assert.equal(description.includes('あなた'), false)
   assert.equal(description.includes('Q1'), false)
+  assert.equal(description.includes('いいえ'), false)
+  assert.equal(description.includes('はい、'), false)
+  assert.equal(description.includes('＼'), false)
+  assert.equal(description.includes('乗用車の整備経験があれば応募できます。'), true)
+  assert.equal(description.includes('先輩教員が指導方法を説明します。'), true)
   assert.equal(description.includes('2024年度'), false)
   assert.equal(description.includes('2〜4名のチーム'), true)
   assert.equal(description.includes(PM_AGENT_DISCLOSURE), true)

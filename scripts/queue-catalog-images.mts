@@ -18,7 +18,9 @@ const endpoint = process.env.CATALOG_GENERATE_API_URL || ''
 const token = process.env.CATALOG_GENERATE_TOKEN || ''
 const quality = process.env.CATALOG_IMAGE_GENERATION_QUALITY || 'medium'
 const totalLimit = Math.max(1, Math.min(Number(process.env.CATALOG_IMAGE_GENERATION_LIMIT) || 10, 50))
-const batchSize = Math.max(1, Math.min(Number(process.env.CATALOG_IMAGE_GENERATION_BATCH_SIZE) || 5, 10))
+// The generation API processes jobs sequentially and has a 300-second runtime cap.
+// Keep the default request to one image so a slow batch cannot discard later results.
+const batchSize = Math.max(1, Math.min(Number(process.env.CATALOG_IMAGE_GENERATION_BATCH_SIZE) || 1, 10))
 
 if (!endpoint) {
   console.log('[catalog-image-queue] CATALOG_GENERATE_API_URL未設定のため生成APIへの投入をスキップ')
