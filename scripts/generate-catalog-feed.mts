@@ -35,6 +35,7 @@ import {
 import {
   buildCatalogDescription,
   buildCatalogTitle,
+  catalogRoleKey,
   catalogRoleLabel,
   validateCatalogCopy,
   type CatalogCopyInput,
@@ -211,6 +212,7 @@ function toCatalogCopyInput(
   return {
     category,
     sourceTitle: job.jobName ?? job.title ?? '',
+    sourceCategory: job.jobCategory?.name ?? '',
     companyName: job.companyName,
     salary: salaryLabel(job),
     employmentType: job.employmentType?.[0] ?? '',
@@ -318,7 +320,7 @@ const HEADERS = [
   'address.city', 'address.country', 'address.postal_code', 'address.region', 'address.street_address',
   'address.latitude', 'address.longitude',
   'product_tags[0]', 'product_tags[1]',
-  'custom_label_0', 'custom_label_1', 'custom_label_2', 'custom_label_3',
+  'custom_label_0', 'custom_label_1', 'custom_label_2', 'custom_label_3', 'custom_label_4',
 ] as const
 
 // ===== 全件取得 =====
@@ -360,6 +362,7 @@ function toRow(
   if (hasResidualPictograph(desc.clean)) return null
 
   const titleS = sanitizeCatalogText(buildCatalogTitle(toCatalogCopyInput(job, cat, region, locality)))
+  const copyInput = toCatalogCopyInput(job, cat, region, locality)
   const copyIssues = validateCatalogCopy(titleS.clean, desc.clean)
   if (copyIssues.length) {
     console.warn(`[catalog-copy] 配信保留: ${job.id} (${copyIssues.join(', ')})`)
@@ -389,6 +392,7 @@ function toRow(
     'custom_label_1': job.employmentType?.[0] ?? '', // 雇用形態
     'custom_label_2': region, // 都道府県
     'custom_label_3': salaryBand(job), // 給与帯
+    'custom_label_4': catalogRoleKey(copyInput), // 職種詳細（商品セット第二軸）
     '_image_source': imagePlan.sourceKind,
     '_reference_image_url': imagePlan.referenceSourceUrl,
     '_source_image_url': imagePlan.spec.sourceUrl,
@@ -414,7 +418,7 @@ function toTSV(rows: Record<string, string>[]): string {
 // 本フィードは説明文を全文含み8MB超→IMPORTDATAのサイズ上限で読めないため、
 // 説明を先頭120字に切り、確認に必要な列だけを日本語ヘッダで出力（1MB未満）。
 const REVIEW_HEADERS = [
-  'id', '職種', '雇用形態', '県', '給与帯', 'タイトル', '会社', '市区町村', '在庫',
+  'id', '職種', '職種詳細', '雇用形態', '県', '給与帯', 'タイトル', '会社', '市区町村', '在庫',
   '画像生成方式', '遷移先参照画像URL', '生成元画像URL', '画像URL', 'リンク',
   'タイトル文字数', '説明文字数', '説明(先頭120字)',
 ] as const
@@ -426,6 +430,7 @@ function toReviewTSV(rows: Record<string, string>[]): string {
     lines.push([
       r['id'],
       r['custom_label_0'],
+      r['custom_label_4'],
       r['custom_label_1'],
       r['custom_label_2'],
       r['custom_label_3'],
@@ -453,7 +458,11 @@ function toImageGenerationQueueItem(job: Job, category: CatalogCategory, reason:
   return {
     job_id: job.id,
     title: buildCatalogTitle(toCatalogCopyInput(job, category, region, locality)),
-    category: catalogRoleLabel({ category, sourceTitle: job.jobName ?? job.title ?? '' }),
+    category: catalogRoleLabel({
+      category,
+      sourceTitle: job.jobName ?? job.title ?? '',
+      sourceCategory: job.jobCategory?.name ?? '',
+    }),
     location: `${region}${locality}`.trim(),
     salary: salaryLabel(job),
     appeal: catalogHtmlToText(job.descriptionAppeal || '').slice(0, 600),
@@ -530,11 +539,24 @@ async function main() {
   const rows = jobs
     .map((job) => toRow(job, generatedImages, imagePlans))
     .filter((r): r is Record<string, string> => r !== null)
+  if (rows.some((row) => row['custom_label_4'] === 'other')) {
+    throw new Error('配信対象求人に詳細職種 other が含まれています')
+  }
   const tsv = toTSV(rows)
   const reviewTsv = toReviewTSV(rows)
   const excluded = jobs.length - rows.length
   const imageSourceCounts = rows.reduce<Record<string, number>>((counts, row) => {
     counts[row['_image_source']] = (counts[row['_image_source']] || 0) + 1
+    return counts
+  }, {})
+  const primaryCategoryCounts = rows.reduce<Record<string, number>>((counts, row) => {
+    const category = row['custom_label_0']
+    counts[category] = (counts[category] || 0) + 1
+    return counts
+  }, {})
+  const detailedRoleCounts = rows.reduce<Record<string, number>>((counts, row) => {
+    const role = row['custom_label_4']
+    counts[role] = (counts[role] || 0) + 1
     return counts
   }, {})
   const qualityReport = JSON.stringify({
@@ -545,6 +567,10 @@ async function main() {
     image_source_counts: imageSourceCounts,
     image_generation_queue_count: imageGenerationQueue.length,
     duplicate_reference_source_count: duplicateReferenceSources.size,
+    classification_counts: {
+      primary: primaryCategoryCounts,
+      detailed: detailedRoleCounts,
+    },
     copy_rules: {
       title_max_length: 42,
       description_min_length: 100,
