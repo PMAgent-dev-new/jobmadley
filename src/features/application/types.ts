@@ -9,6 +9,7 @@ export interface ApplicationFormData {
   email: string
   companyName: string
   jobName: string
+  jobCategoryName?: string
   jobUrl: string
   applicationSource: string
   utmSource?: string
