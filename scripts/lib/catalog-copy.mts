@@ -33,6 +33,8 @@ const PROHIBITED_PHRASES = [
 const EMPLOYER_VOICE = /当社|弊社|当営業所|当店|当校|当法人|当グループ|私たち|私ども|我が社/
 const SELECTION_FLOW = /選考の流れ|応募方法|応募いただいた後|応募後は|株式会社PM Agentから|RIDE JOBのワンストップ/
 const QA_HEADING = /^(?:【?Q\d+】?|Q\d+[.．:：]|よくある質問)/i
+const QUESTION_UNIT = /[?？]\s*$/
+const STANDALONE_QA_ANSWER = /^(?:問題ありません|ご安心ください)[。！!]*$/
 const VAGUE_INCOME_CLAIM = /誰でも稼げる|高収入(?:が可能|を実現)?|安定収入|しっかり稼げる|がっつり稼げる/
 
 function normalizeWhitespace(value: string): string {
@@ -68,6 +70,13 @@ function splitUnits(value: string): string[] {
     .filter(Boolean)
 }
 
+function normalizeQaStyle(value: string): string {
+  return value
+    .replace(/[＼\\][^＼\\／/]{1,120}[／/]/g, ' ')
+    .replace(/^\s*(?:はい|いいえ)(?:[、。！!\s]+|$)/, '')
+    .trim()
+}
+
 function clipAtBoundary(value: string, maxLength: number): string {
   const clean = normalizeWhitespace(value)
   if (clean.length <= maxLength) return clean
@@ -87,9 +96,12 @@ function compactSection(
   const seen = new Set<string>()
   const selected: string[] = []
 
-  for (const unit of splitUnits(plain)) {
+  for (const rawUnit of splitUnits(plain)) {
+    const unit = normalizeQaStyle(rawUnit)
+    if (!unit) continue
     if (PROHIBITED_PHRASES.some((phrase) => unit.includes(phrase))) continue
-    if (SELECTION_FLOW.test(unit) || QA_HEADING.test(unit)) continue
+    if (SELECTION_FLOW.test(unit) || QA_HEADING.test(unit) || QUESTION_UNIT.test(unit)) continue
+    if (STANDALONE_QA_ANSWER.test(unit)) continue
     if (isStaleClaim(unit, currentYear)) continue
     if (VAGUE_INCOME_CLAIM.test(unit) && !/[0-9０-９]/.test(unit)) continue
 
