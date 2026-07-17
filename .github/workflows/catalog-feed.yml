@@ -22,6 +22,11 @@ on:
         required: false
         default: false
         type: boolean
+      generate_image_candidates:
+        description: 求人別の画像候補を承認キューへ生成する
+        required: false
+        default: true
+        type: boolean
 
 concurrency:
   group: catalog-feed
@@ -64,10 +69,12 @@ jobs:
           CATALOG_ALLOW_GENERIC_IMAGE_FALLBACK: 'false'
 
       - name: Generate job-specific image candidates
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.generate_image_candidates }}
         run: npm run generate:catalog-image-candidates
         env:
           CATALOG_GENERATE_API_URL: ${{ secrets.CATALOG_GENERATE_API_URL }}
           CATALOG_GENERATE_TOKEN: ${{ secrets.CATALOG_GENERATE_TOKEN }}
           CATALOG_IMAGE_GENERATION_LIMIT: '10'
-          CATALOG_IMAGE_GENERATION_BATCH_SIZE: '5'
+          # The API generates sequentially and has a 300-second production runtime cap.
+          CATALOG_IMAGE_GENERATION_BATCH_SIZE: '1'
           CATALOG_IMAGE_GENERATION_QUALITY: medium
