@@ -151,3 +151,34 @@ export const isValidPhoneNumber = (phone: string): boolean => {
   const phoneRegex = /^[0-9]{10,11}$/
   return phoneRegex.test(phone.replace(/[-\s]/g, ""))
 }
+
+// =====================
+// CMS入稿本文の整形
+// =====================
+
+/**
+ * 行頭の装飾記号（CMS入稿の箇条書きマーカー）。
+ * 「・」「-」は語中でも使われる（例:「借上げ社宅・独身寮」）ため、行頭に限定して除去する。
+ */
+const LEADING_DECORATION_RE = /^[\s✅✔☑◎○●◇◆■□▼▽▶★☆※→・\-–—*+]+/
+
+/**
+ * CMS入稿本文（descriptionAppeal / salaryNote など）を1行のプレーンテキストへ整形する。
+ * 入稿本文は「✅」始まりの箇条書き＋改行を含むため、そのまま meta description や
+ * FAQ の回答に載せると記号と改行が露出する。meta と FAQ で同じ整形を使いたいので
+ * ここに集約している（二重管理を避けるため）。
+ */
+export const normalizeCmsText = (raw?: string): string => {
+  if (!raw) return ''
+  return raw
+    // タグは空文字ではなく改行へ置換する（<br> や </p> で区切られた文が連結するのを防ぐ）
+    .replace(/<[^>]*>/g, '\n')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .split(/\r?\n/)
+    .map((line) => line.replace(LEADING_DECORATION_RE, '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}

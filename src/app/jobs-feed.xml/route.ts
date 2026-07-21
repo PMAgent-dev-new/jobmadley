@@ -21,7 +21,8 @@ const jobtypeOf = (emp?: string[]): string => {
 
 const salaryOf = (job: JobDetail): string => {
   if (!job.salaryMin) return ""
-  const unit = job.wageType?.[0] ?? "月給"
+  // 空文字のセレクト値で単位が消えないよう ?? ではなく || で月給へフォールバック
+  const unit = job.wageType?.[0]?.trim() || "月給"
   const min = job.salaryMin.toLocaleString()
   const max = job.salaryMax && job.salaryMax !== job.salaryMin ? `～${job.salaryMax.toLocaleString()}円` : "円"
   return `${unit}${min}${max}`

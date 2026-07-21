@@ -17,7 +17,7 @@ import SearchPagination from "./components/search-pagination"
 import SortTabs from "./components/sort-tabs"
 import FilterSidebar from "./components/filter-sidebar"
 import { generateSearchMetadata } from "@/shared/lib/metadata"
-import { hasSearchQuery, normalizeSearchParams } from "@/shared/lib/search-params"
+import { normalizeSearchParams } from "@/shared/lib/search-params"
 
 // 検索はリアルタイム性が重要（掲載終了/新着の即時反映）。共有 fetcher が付与する
 // revalidate:3600 をこのルートでは打ち消し、求人取得を常にフレッシュにする。
@@ -28,32 +28,34 @@ interface SearchPageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }
 
-export async function generateMetadata({ searchParams }: SearchPageProps): Promise<Metadata> {
-  const rawParams = await searchParams
-  const { normalized } = normalizeSearchParams(rawParams)
-  const queryExists = hasSearchQuery(normalized)
-
+export async function generateMetadata(): Promise<Metadata> {
   const base = generateSearchMetadata({})
 
-  // noindex のパラメータ付きURLに indexable な /search への canonical を併記すると
-  // 矛盾シグナルになる（Google は noindex ページからの canonical 併用を非推奨）。
-  // index する素の /search のみ self-canonical を出す。
+  // /search はUI用の絞り込み画面であり、パラメータの組み合わせで無限にURLが生える。
+  // index面の主役は /jobs/[prefecture]/[jobCategory] のハブページで、素の /search を
+  // index させると同じ求人集合をハブと食い合う（重複競合）。よってパラメータの有無に
+  // よらず一律 noindex にする。hub.ts の searchUrl コメント「/search はUI用・noindex」
+  // が本来の設計意図で、実装だけが素の /search を index させて乖離していた。
+  //
+  // follow は残す: ハブ・求人詳細への内部リンクは辿らせてクロールを流したいため。
+  //
+  // canonical は出さない: noindex ページに canonical を併記すると矛盾シグナルになり
+  // Google 非推奨。generateSearchMetadata が常に canonical を返すので明示的に打ち消す。
+  //
+  // googleBot も明示的に false にする: 親（layout.tsx の baseMetadata）が
+  // robots.googleBot.index = true を持っており、万一マージで残ると
+  // <meta name="googlebot"> が noindex を上書きして静かに効かなくなるため。
   return {
     ...base,
-    alternates: queryExists
-      ? undefined
-      : {
-          canonical: "/search",
-        },
-    robots: queryExists
-      ? {
-          index: false,
-          follow: true,
-        }
-      : {
-          index: true,
-          follow: true,
-        },
+    alternates: undefined,
+    robots: {
+      index: false,
+      follow: true,
+      googleBot: {
+        index: false,
+        follow: true,
+      },
+    },
   }
 }
 

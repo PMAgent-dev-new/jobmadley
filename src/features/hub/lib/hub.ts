@@ -116,23 +116,53 @@ export const hubTitle = {
 /**
  * マスタ（都道府県・職種）と件数マトリクスを1時間キャッシュでまとめて取得する。
  * generateStaticParams・generateMetadata・各ページ描画で共有し、CMSコールを最小化する。
+ *
+ * 注意: microCMS に職種カテゴリを追加した直後は反映が遅れる（運用上の既知挙動）。
+ * このキャッシュ自体は sitemap.ts とハブ各ページで同一エントリを共有している
+ * （キーはコールバックのソース＋["hub-master-data"]で、ルートやbuildIdに依存しない）。
+ * それでも「sitemap には新ハブURLが載るのにページは404」というズレが出るのは、
+ * TTLの時計が独立した層が積み重なっているため:
+ *   1. 内側の microCMS fetch キャッシュ（shared/microcms/fetcher.ts の revalidate=3600）
+ *   2. この unstable_cache（revalidate=3600）
+ *   3. ルート単位のISR（sitemap.ts / ハブページの export const revalidate=3600）
+ * 各層は stale-while-revalidate（期限切れ後の最初の1回は古い値を返してから裏で更新）なので、
+ * 新カテゴリが全体に行き渡るまで実効で最大2時間程度かかりうる。さらにその途中で新URLを踏むと
+ * notFound() の結果が3のISRに乗り、マスタが新しくなっても404が残り続けることがある。
+ * 即時反映の仕組み（tags＋revalidateTag／再検証APIエンドポイント）は、カテゴリ追加が年数回の
+ * 稀な運用イベントで放置しても自動解消する一方、恒久的なキャッシュ全消し口を抱えることになり
+ * 割に合わないため、あえて持たない。手順は docs/search-console-operations.md の6章を参照。
  */
-export const getHubData = unstable_cache(
-  async (): Promise<{
-    prefectures: Prefecture[]
-    categories: JobCategory[]
-    matrix: JobCountMatrix
-  }> => {
-    const [prefectures, categories, matrix] = await Promise.all([
-      getPrefectures(),
-      getJobCategories(),
-      getJobCountMatrix(),
-    ])
-    return { prefectures, categories, matrix }
+/**
+ * マスタ（都道府県・職種）だけを短いTTLで持つ。
+ * 求人件数マトリクスと同じ1時間TTLで束ねていたのをやめた理由:
+ * マスタは2コール・数十件と軽いのに、ここが古いと「CMSに職種を追加したのにハブが404」に
+ * 直結する。一方マトリクスは求人を100件刻みで全件ページングする重い処理で、頻繁に回すと
+ * microCMS のレート制限に触れる。性質が違うものを同じ寿命で束ねていたのが遅延の主因だった。
+ */
+const getHubMasters = unstable_cache(
+  async (): Promise<{ prefectures: Prefecture[]; categories: JobCategory[] }> => {
+    const [prefectures, categories] = await Promise.all([getPrefectures(), getJobCategories()])
+    return { prefectures, categories }
   },
-  ["hub-master-data"],
+  ["hub-masters"],
+  { revalidate: 300 },
+)
+
+/** 求人件数マトリクス。全件ページングで重いので長めのTTLを維持する。 */
+const getHubMatrix = unstable_cache(
+  async (): Promise<JobCountMatrix> => getJobCountMatrix(),
+  ["hub-count-matrix"],
   { revalidate: 3600 },
 )
+
+export const getHubData = async (): Promise<{
+  prefectures: Prefecture[]
+  categories: JobCategory[]
+  matrix: JobCountMatrix
+}> => {
+  const [masters, matrix] = await Promise.all([getHubMasters(), getHubMatrix()])
+  return { ...masters, matrix }
+}
 
 /** 県×職種の件数 */
 export const prefCatCount = (m: JobCountMatrix, prefId: string, catId: string): number =>
@@ -239,8 +269,16 @@ export interface HubStats {
 }
 
 export const computeHubStats = (jobs: Job[]): HubStats => {
-  const mins = jobs.map((j) => j.salaryMin).filter((n): n is number => typeof n === "number" && n > 0)
-  const maxs = jobs.map((j) => j.salaryMax ?? j.salaryMin).filter((n): n is number => typeof n === "number" && n > 0)
+  // 給与レンジは「月給」の求人だけで集計する。時給・日給・年収の求人を混ぜると
+  // 最小値が時給額（例: 1,500円）になり yen() で「月給0万円〜」と壊れた表示になり、
+  // 年収求人が混ざれば上限が実態より跳ね上がるため。
+  // wageType 未設定は月給扱い（microCMS の既定運用。従来の集計対象と同じ）。
+  const monthlyJobs = jobs.filter((j) => {
+    const unit = j.wageType?.[0]?.trim()
+    return !unit || unit === "月給"
+  })
+  const mins = monthlyJobs.map((j) => j.salaryMin).filter((n): n is number => typeof n === "number" && n > 0)
+  const maxs = monthlyJobs.map((j) => j.salaryMax ?? j.salaryMin).filter((n): n is number => typeof n === "number" && n > 0)
   const salaryText = mins.length > 0 ? `月給${yen(Math.min(...mins))}〜${yen(Math.max(...maxs))}` : undefined
 
   const empCount: Record<string, number> = {}

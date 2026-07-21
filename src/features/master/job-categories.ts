@@ -1,4 +1,4 @@
-import { fetchDetailOrNull, fetchList } from "@/shared/microcms/fetcher"
+import { fetchDetailOrNull, fetchList, MASTER_REVALIDATE_SECONDS } from "@/shared/microcms/fetcher"
 import type { JobCategory } from "./types"
 
 /** 職種カテゴリ一覧を取得 */
@@ -7,6 +7,8 @@ export const getJobCategories = async (): Promise<JobCategory[]> => {
     endpoint: "jobcategories",
     queries: { limit: 100 },
     context: "getJobCategories",
+    // マスタは短TTL。ここが古いとカテゴリ追加がハブに反映されない
+    revalidate: MASTER_REVALIDATE_SECONDS,
   })
   return data.contents
 }

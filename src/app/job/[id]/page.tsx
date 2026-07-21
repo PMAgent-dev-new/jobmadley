@@ -10,9 +10,11 @@ import { AppError, ErrorType, withErrorHandling } from "@/shared/lib/error-handl
 import JobBreadcrumb from "../components/job-breadcrumb"
 import JobTitleActions from "../components/job-title-actions"
 import JobDescription from "../components/job-description"
+import JobFaqSection from "../components/job-faq"
 import RelatedJobs from "../components/related-jobs"
 import { getMediaArticles } from "@/features/media/api"
-import { generateBreadcrumbStructuredData, generateJobMetadata, generateJobPostingStructuredData } from "@/shared/lib/metadata"
+import { buildJobFaqs } from "@/features/jobs/lib/job-faq"
+import { generateBreadcrumbStructuredData, generateFaqStructuredData, generateJobMetadata, generateJobPostingStructuredData } from "@/shared/lib/metadata"
 import JobViewTracker from "../components/job-view-tracker"
 import { isMetaCatalogJob } from "@/shared/lib/catalog-eligibility"
 
@@ -84,6 +86,10 @@ export default async function JobPage({ params }: JobPageProps) {
   )
 
   const jobPostingStructuredData = generateJobPostingStructuredData(job)
+  // FAQは求人の実データだけから生成する。本文表示（JobFaqSection）と FAQPage で同じ配列を
+  // 使い回すことで、文言の不一致（Googleのガイドライン違反）が起きない構造にしている。
+  const jobFaqs = buildJobFaqs(job)
+  const faqStructuredData = jobFaqs.length > 0 ? generateFaqStructuredData(jobFaqs) : null
   const breadcrumbItems: Array<{ name: string; url?: string }> = [{ name: "トップページ", url: "/" }]
 
   const prefSlug = job.prefecture?.slug
@@ -132,6 +138,13 @@ export default async function JobPage({ params }: JobPageProps) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbStructuredData).replace(/</g, "\\u003c") }}
       />
+      {/* 本文に表示できるFAQが1件以上ある求人のみ FAQPage を出す */}
+      {faqStructuredData && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(faqStructuredData).replace(/</g, "\\u003c") }}
+        />
+      )}
       <SiteHeader />
 
       <JobBreadcrumb job={job} />
@@ -142,6 +155,8 @@ export default async function JobPage({ params }: JobPageProps) {
             <JobTitleActions job={job} />
 
             <JobDescription job={job} />
+
+            <JobFaqSection faqs={jobFaqs} />
 
             <RelatedJobs jobs={relatedJobs} title="類似求人" />
           </div>

@@ -191,7 +191,8 @@ export const getGroupJobsForStats = async (categoryIds: string[]): Promise<Job[]
   while (true) {
     const data = await fetchList<Job>({
       endpoint: "jobs",
-      queries: { limit, offset, depth: 1, fields: "id,jobName,title,salaryMin,salaryMax,employmentType,companyName,tags", filters },
+      // wageType は computeHubStats の給与レンジ集計（月給求人のみを対象にする）に必要
+      queries: { limit, offset, depth: 1, fields: "id,jobName,title,salaryMin,salaryMax,wageType,employmentType,companyName,tags", filters },
       context: "getGroupJobsForStats",
     })
     jobs.push(...data.contents)
@@ -220,7 +221,8 @@ export const getJobsForStats = async (params: {
         limit,
         offset,
         depth: 1,
-        fields: "id,jobName,title,salaryMin,salaryMax,employmentType,companyName,tags",
+        // wageType は computeHubStats の給与レンジ集計（月給求人のみを対象にする）に必要
+        fields: "id,jobName,title,salaryMin,salaryMax,wageType,employmentType,companyName,tags",
         ...(filters ? { filters } : {}),
       },
       context: "getJobsForStats",
