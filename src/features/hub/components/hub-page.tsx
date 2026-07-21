@@ -90,15 +90,27 @@ export default function HubPage({
   external,
 }: HubPageProps) {
   const breadcrumbLd = generateBreadcrumbStructuredData(breadcrumb)
-  const itemListLd = generateItemListStructuredData(
-    jobs.map((j) => ({ url: `/job/${j.id}`, name: j.jobName ?? j.title })),
-  )
+  // ItemList はこのページに実際に並ぶ求人（自社＋外部）を列挙する。
+  // 自社求人0件・外部求人のみのハブ（例: 青森県×トラックドライバー）で
+  // itemListElement が空になり「中身のないページ」と受け取られるのを避けるため。
+  const itemListItems = [
+    ...jobs.map((j) => ({ url: `/job/${j.id}`, name: j.jobName ?? j.title })),
+    // URLの作り方は ExternalJobsSection のカードと完全に揃える（source は素通し・sourceId のみエンコード）
+    ...(external?.jobs ?? []).map((j) => ({
+      url: `/external-job/${j.source}/${encodeURIComponent(j.sourceId)}`,
+      name: j.title,
+    })),
+  ]
+  // 1件も無いなら ItemList 自体を出さない（空の構造化データは無意味なため）
+  const itemListLd = itemListItems.length > 0 ? generateItemListStructuredData(itemListItems) : null
   const faqLd = faqs.length > 0 ? generateFaqStructuredData(faqs) : null
 
   return (
     <div className="min-h-screen bg-white">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumbLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(itemListLd) }} />
+      {itemListLd && (
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(itemListLd) }} />
+      )}
       {faqLd && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(faqLd) }} />}
       <SiteHeader />
 

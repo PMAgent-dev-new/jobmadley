@@ -18,17 +18,29 @@ const logFailure = (context: string, detail: Record<string, unknown>, error: unk
 // プレビュー（draftKey 付き）は常に最新を取得するため no-store のままにする。
 const REVALIDATE_SECONDS = 3600
 
-const buildRequestInit = (queries?: MicroCMSQueries): RequestInit => {
+/**
+ * マスタ（都道府県・職種カテゴリ）用の短いTTL。
+ * 件数が数十件と小さく応答も軽い一方、ここが古いと「CMSに職種を追加したのに
+ * ハブページが404のまま」という運用事故に直結する。求人本体（重い・変化が緩やか）とは
+ * 性質が違うので、マスタだけ短く回す。
+ */
+const MASTER_REVALIDATE_SECONDS = 300
+
+const buildRequestInit = (queries?: MicroCMSQueries, revalidate?: number): RequestInit => {
   const hasDraftKey = Boolean(queries && (queries as Record<string, unknown>).draftKey)
   if (hasDraftKey) return { cache: "no-store" }
-  return { next: { revalidate: REVALIDATE_SECONDS } } as RequestInit
+  return { next: { revalidate: revalidate ?? REVALIDATE_SECONDS } } as RequestInit
 }
+
+export { MASTER_REVALIDATE_SECONDS }
 
 export interface FetchListParams<TQueries extends MicroCMSQueries = MicroCMSQueries> {
   endpoint: string
   queries?: TQueries
   context: string
   client?: ClientKey
+  /** キャッシュTTL(秒)。省略時は既定値。マスタ系は MASTER_REVALIDATE_SECONDS を渡す */
+  revalidate?: number
 }
 
 export const fetchList = async <T>({
@@ -36,12 +48,13 @@ export const fetchList = async <T>({
   queries,
   context,
   client = "primary",
+  revalidate,
 }: FetchListParams): Promise<MicroCMSListResponse<T>> => {
   try {
     return await clientFor(client).get<MicroCMSListResponse<T>>({
       endpoint,
       queries,
-      customRequestInit: buildRequestInit(queries),
+      customRequestInit: buildRequestInit(queries, revalidate),
     })
   } catch (error) {
     logFailure(context, { endpoint, queries }, error)

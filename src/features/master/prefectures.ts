@@ -1,4 +1,4 @@
-import { fetchDetailOrNull, fetchList } from "@/shared/microcms/fetcher"
+import { fetchDetailOrNull, fetchList, MASTER_REVALIDATE_SECONDS } from "@/shared/microcms/fetcher"
 import type { Prefecture, PrefectureGroup } from "./types"
 
 /** 都道府県一覧を取得 */
@@ -7,6 +7,8 @@ export const getPrefectures = async (): Promise<Prefecture[]> => {
     endpoint: "prefectures",
     queries: { limit: 100 },
     context: "getPrefectures",
+    // マスタは短TTL。ここが古いとカテゴリ追加がハブに反映されない
+    revalidate: MASTER_REVALIDATE_SECONDS,
   })
   return data.contents
 }

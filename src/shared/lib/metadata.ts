@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import type { JobDetail, Job } from '@/features/jobs/types'
+import { normalizeCmsText } from '@/shared/lib/utils'
 
 // =====================
 // メタデータ設定
@@ -133,6 +134,51 @@ export const generateSearchMetadata = (params: {
   }
 }
 
+// =====================
+// meta description 整形ヘルパー
+// =====================
+
+/** meta description の目安長。日本語SERPは全角120字前後で切られるため、この範囲に収める */
+const JOB_DESCRIPTION_MAX_LENGTH = 120
+
+/**
+ * CMS本文を meta description 用の1行テキストへ整形する。
+ * 実体は shared/lib/utils の normalizeCmsText（FAQ生成と同じ整形を使うため共通化）。
+ */
+const normalizeDescriptionSource = (raw?: string): string => normalizeCmsText(raw)
+
+/**
+ * 指定字数に収まるよう切り詰める。語の途中で切れて意味が壊れないよう、
+ * 句点 → 読点・括弧閉じ・項目区切り の順に切断位置を探し、見つからない場合のみ字数で切る。
+ * 句点で終われた場合は文として完結しているので「…」は付けない。
+ */
+const truncateForDescription = (text: string, maxLength: number): string => {
+  // 「…」で1字使うため、2字未満の予算しか無ければ何も入れない
+  if (!text || maxLength < 2) return ''
+  const chars = Array.from(text)
+  if (chars.length <= maxLength) return text
+
+  // 末尾の「…」1字ぶんを空けて候補を切り出す
+  const head = chars.slice(0, maxLength - 1).join('')
+  // 極端に短く切れるのを避けるため、切断位置は候補の後半にある場合のみ採用する
+  const minCut = head.length / 2
+  const sentenceEnd = Math.max(
+    head.lastIndexOf('。'),
+    head.lastIndexOf('！'),
+    head.lastIndexOf('？'),
+  )
+  if (sentenceEnd >= minCut) return head.slice(0, sentenceEnd + 1)
+
+  const softBreak = Math.max(
+    head.lastIndexOf('、'),
+    head.lastIndexOf('，'),
+    head.lastIndexOf('）'),
+    head.lastIndexOf(' '),
+  )
+  const cut = softBreak >= minCut ? softBreak + 1 : head.length
+  return `${head.slice(0, cut).replace(/[、，\s]+$/, '')}…`
+}
+
 /**
  * 求人詳細ページのメタデータ
  */
@@ -155,16 +201,27 @@ export const generateJobMetadata = (job: JobDetail): Metadata => {
   const locationText =
     locality && region ? `${locality}（${region}）` : region || locality || ''
 
+  // 給与の単位は wageType（microCMS の給与形態）に従う。「月給」固定だと時給・日給の
+  // 求人で「月給1,500円〜」という誤表記になり、同ページの JobPosting
+  // baseSalary.unitText（HOUR/DAY）とも矛盾するため。未設定は従来どおり月給。
+  const wageLabel = wageUnitLabel(job.wageType)
   const salaryText = job.salaryMin && job.salaryMax
-    ? `月給${job.salaryMin.toLocaleString()}円～${job.salaryMax.toLocaleString()}円`
+    ? `${wageLabel}${job.salaryMin.toLocaleString()}円～${job.salaryMax.toLocaleString()}円`
     : job.salaryMin
-    ? `月給${job.salaryMin.toLocaleString()}円〜`
+    ? `${wageLabel}${job.salaryMin.toLocaleString()}円〜`
     : '給与応相談'
 
-  const appeal = job.descriptionAppeal || job.descriptionWork || '詳細情報をご確認ください。'
-  const description = locationText
-    ? `${locationText}の${job.jobCategory?.name || 'ドライバー'}求人。${salaryText}。${appeal}`
-    : `${job.jobCategory?.name || 'ドライバー'}求人。${salaryText}。${appeal}`
+  // 地域・職種・給与の定型部分を先に確定し、残り字数だけCMS本文を入れる。
+  // 旧実装は job.descriptionAppeal を無加工で連結していたため、✅ や改行が
+  // そのまま meta description に載り、SERPで表示が崩れてCTRを損なっていた。
+  const descriptionPrefix = locationText
+    ? `${locationText}の${job.jobCategory?.name || 'ドライバー'}求人。${salaryText}。`
+    : `${job.jobCategory?.name || 'ドライバー'}求人。${salaryText}。`
+  const appeal = truncateForDescription(
+    normalizeDescriptionSource(job.descriptionAppeal || job.descriptionWork),
+    JOB_DESCRIPTION_MAX_LENGTH - Array.from(descriptionPrefix).length,
+  )
+  const description = `${descriptionPrefix}${appeal || '詳細情報をご確認ください。'}`
   
   const imageUrl = job.images?.[0]?.url || job.imageUrl || OGP_IMAGE
   
@@ -254,6 +311,18 @@ const WAGE_UNIT_MAP: Record<string, string> = {
 const mapWageUnit = (values?: string[]): string => {
   const v = values?.[0]?.trim()
   return (v && WAGE_UNIT_MAP[v]) || 'MONTH'
+}
+
+/**
+ * 表示テキスト用の給与単位ラベル（「月給」「時給」など）。
+ * JobPosting の unitText と同じ語彙（WAGE_UNIT_MAP）で検証するため、
+ * 本文の表記と構造化データの単位が食い違わない。
+ * 未設定・未知値は「月給」へフォールバック（microCMS の既定運用が月給のため、
+ * wageType を持たない既存求人の表示は変わらない）。
+ */
+const wageUnitLabel = (values?: string[]): string => {
+  const v = values?.[0]?.trim()
+  return v && WAGE_UNIT_MAP[v] ? v : '月給'
 }
 
 /** prefecture/municipality 参照が無い場合に addressPrefMuni から都道府県・市区町村を抽出 */

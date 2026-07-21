@@ -89,11 +89,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "daily",
       priority: 1,
     },
-    {
-      url: `${SITE_URL}/search`,
-      changeFrequency: "daily",
-      priority: 0.8,
-    },
+    // /search は noindex（src/app/search/page.tsx 参照）。無限にURLが生えるUI用ページで
+    // index面の主役であるハブページと重複競合するため index させない方針。
+    // noindex URL を sitemap に載せるとGSCで「送信されたURLに noindex が含まれています」
+    // エラーになり、限られたクロール枠もハブ・求人詳細から奪うので掲載しない。
     {
       url: `${SITE_URL}/about`,
       changeFrequency: "monthly",
