@@ -3,6 +3,7 @@ import type { Metadata } from "next"
 import HubPage from "@/features/hub/components/hub-page"
 import { getJobsPaged, getJobsForStats } from "@/features/jobs/api"
 import { getMediaArticlesByKeyword } from "@/features/media/api"
+import { getExternalJobsForHub, hasExternalJobsForCategory } from "@/features/external-jobs/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
 import {
   HUB_MIN_JOBS,
@@ -88,6 +89,19 @@ export default async function Page({ params }: Props) {
   const cc = catContent[cat.slug!]
   const content = await getHubContent(base)
 
+  // ハローワーク転載求人（対応職種のみ・自社求人とは別枠で表示）
+  const moreHref = searchUrl({ prefectureId: pref.id, jobCategoryId: cat.id })
+  const external = hasExternalJobsForCategory(cat.slug)
+    ? await (async () => {
+        const { jobs, count } = await getExternalJobsForHub({
+          prefectureRegion: pref.region,
+          hubCatSlug: cat.slug!,
+          limit: 24,
+        })
+        return { jobs, count, region: pref.region, catName: cat.name, selfJobsHref: moreHref }
+      })()
+    : undefined
+
   // ハブ→メディア相互リンク（P1-1）。職種に対応するお役立ち記事を掲載
   const articleKeyword = hubArticleKeyword(cat.slug)
   const relatedArticles = articleKeyword
@@ -118,7 +132,8 @@ export default async function Page({ params }: Props) {
       categoryContent={cc ? { catName: cat.name, ...cc } : undefined}
       faqs={buildHubFaqs({ region: pref.region, catName: cat.name, catSlug: cat.slug!, stats })}
       relatedArticles={relatedArticles}
-      moreHref={searchUrl({ prefectureId: pref.id, jobCategoryId: cat.id })}
+      external={external}
+      moreHref={moreHref}
       related={[
         { title: `${cat.name}の求人をすべての地域で見る`, links: [{ label: `${cat.name}の求人一覧（全国）`, href: hubUrl.category(cat.slug!) }] },
         { title: `${pref.region}の他の職種から探す`, links: sameKenOtherCat },

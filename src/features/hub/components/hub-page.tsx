@@ -4,6 +4,8 @@ import SiteHeader from "@/shared/components/site-header"
 import SiteFooter from "@/shared/components/site-footer"
 import JobCard from "@/features/jobs/components/job-card"
 import type { Job } from "@/features/jobs/types"
+import ExternalJobsSection from "@/features/external-jobs/components/external-jobs-section"
+import type { ExternalJob } from "@/features/external-jobs/types"
 import {
   generateBreadcrumbStructuredData,
   generateItemListStructuredData,
@@ -56,6 +58,14 @@ interface HubPageProps {
   jobLinks?: Array<{ id: string; name: string }>
   /** 企業ハブなどでH1の横に表示する識別画像。通常ハブでは省略。 */
   heroImage?: { src: string; alt: string }
+  /** ハローワーク転載求人（自社求人とは別枠・出典明記で表示。対応職種のみ） */
+  external?: {
+    jobs: ExternalJob[]
+    count: number
+    region: string
+    catName: string
+    selfJobsHref: string
+  }
 }
 
 const jsonLd = (obj: unknown) => JSON.stringify(obj).replace(/</g, "\\u003c")
@@ -77,6 +87,7 @@ export default function HubPage({
   relatedArticles = [],
   jobLinks = [],
   heroImage,
+  external,
 }: HubPageProps) {
   const breadcrumbLd = generateBreadcrumbStructuredData(breadcrumb)
   const itemListLd = generateItemListStructuredData(
@@ -240,6 +251,17 @@ export default function HubPage({
             </div>
           )}
         </section>
+
+        {/* ハローワーク転載求人（自社求人とは別枠・出典明記） */}
+        {external && (
+          <ExternalJobsSection
+            jobs={external.jobs}
+            count={external.count}
+            region={external.region}
+            catName={external.catName}
+            selfJobsHref={external.selfJobsHref}
+          />
+        )}
 
         {/* よくある質問（AIO / FAQPage） */}
         {faqs.length > 0 && (
