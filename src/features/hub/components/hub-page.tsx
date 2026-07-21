@@ -4,6 +4,8 @@ import SiteHeader from "@/shared/components/site-header"
 import SiteFooter from "@/shared/components/site-footer"
 import JobCard from "@/features/jobs/components/job-card"
 import type { Job } from "@/features/jobs/types"
+import ExternalJobsSection from "@/features/external-jobs/components/external-jobs-section"
+import type { ExternalJob } from "@/features/external-jobs/types"
 import {
   generateBreadcrumbStructuredData,
   generateItemListStructuredData,
@@ -56,6 +58,14 @@ interface HubPageProps {
   jobLinks?: Array<{ id: string; name: string }>
   /** 企業ハブなどでH1の横に表示する識別画像。通常ハブでは省略。 */
   heroImage?: { src: string; alt: string }
+  /** ハローワーク転載求人（自社求人とは別枠・出典明記で表示。対応職種のみ） */
+  external?: {
+    jobs: ExternalJob[]
+    count: number
+    region: string
+    catName: string
+    selfJobsHref: string
+  }
 }
 
 const jsonLd = (obj: unknown) => JSON.stringify(obj).replace(/</g, "\\u003c")
@@ -77,6 +87,7 @@ export default function HubPage({
   relatedArticles = [],
   jobLinks = [],
   heroImage,
+  external,
 }: HubPageProps) {
   const breadcrumbLd = generateBreadcrumbStructuredData(breadcrumb)
   const itemListLd = generateItemListStructuredData(
@@ -136,10 +147,20 @@ export default function HubPage({
           </h2>
           {summary && <p className="mt-3 text-gray-700 leading-relaxed">{summary}</p>}
           <dl className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {/* 外部求人があるハブでは「掲載件数」を1つにまとめず内訳で出す。
+                応募・相談できるのは RIDE JOB 掲載分だけなので合算表示は誤認を招く。 */}
             <div className="rounded-lg bg-gray-50 p-3">
-              <dt className="text-xs text-gray-500">掲載件数</dt>
+              <dt className="text-xs text-gray-500">
+                {external ? "RIDE JOB掲載" : "掲載件数"}
+              </dt>
               <dd className="text-lg font-bold text-gray-900">{totalCount}件</dd>
             </div>
+            {external && (
+              <div className="rounded-lg bg-gray-50 p-3">
+                <dt className="text-xs text-gray-500">ハローワーク公開求人</dt>
+                <dd className="text-lg font-bold text-gray-900">{external.count}件</dd>
+              </div>
+            )}
             {stats.salaryText && (
               <div className="rounded-lg bg-gray-50 p-3">
                 <dt className="text-xs text-gray-500">給与レンジ</dt>
@@ -240,6 +261,17 @@ export default function HubPage({
             </div>
           )}
         </section>
+
+        {/* ハローワーク転載求人（自社求人とは別枠・出典明記） */}
+        {external && (
+          <ExternalJobsSection
+            jobs={external.jobs}
+            count={external.count}
+            region={external.region}
+            catName={external.catName}
+            selfJobsHref={external.selfJobsHref}
+          />
+        )}
 
         {/* よくある質問（AIO / FAQPage） */}
         {faqs.length > 0 && (

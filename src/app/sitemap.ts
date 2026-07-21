@@ -12,15 +12,26 @@ import {
   getHubData,
 } from "@/features/hub/lib/hub"
 import { FEATURED_COMPANIES, matchesFeaturedCompany } from "@/features/companies/data"
+import { getExternalHubCounts, qualifiesByExternalJobs } from "@/features/external-jobs/api"
 
-/** 地域×職種ハブページ群のsitemapエントリを生成（生成対象＝件数しきい値以上の県×職種＋全県＋全職種） */
+/**
+ * 地域×職種ハブページ群のsitemapエントリを生成（生成対象＝全県＋全職種＋しきい値以上の県×職種）。
+ *
+ * 県×職種は「自社求人 HUB_MIN_JOBS 件以上」または「ハローワーク転載求人 HUB_MIN_EXTERNAL_JOBS 件以上」で掲載する。
+ * 自社基準だけだと、外部求人で在庫を補うために作った薄いハブ（トラック等）が丸ごと sitemap から
+ * 落ちて孤立ページになり、転載求人を載せた意味が無くなる。
+ */
 const getHubRoutes = async (): Promise<MetadataRoute.Sitemap> => {
   const { prefectures, categories, matrix } = await getHubData()
+  const externalCounts = await getExternalHubCounts()
   const routes: MetadataRoute.Sitemap = []
   for (const p of withSlug(prefectures)) {
     routes.push({ url: `${SITE_URL}${hubUrl.prefecture(p.slug)}`, changeFrequency: "daily", priority: 0.6 })
     for (const c of withSlug(categories)) {
-      if (prefCatCount(matrix, p.id, c.id) >= HUB_MIN_JOBS) {
+      if (
+        prefCatCount(matrix, p.id, c.id) >= HUB_MIN_JOBS ||
+        qualifiesByExternalJobs(externalCounts, p.region, c.slug)
+      ) {
         routes.push({
           url: `${SITE_URL}${hubUrl.prefectureCategory(p.slug, c.slug)}`,
           changeFrequency: "daily",
