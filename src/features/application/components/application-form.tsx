@@ -9,6 +9,7 @@ import SiteHeader from "@/shared/components/site-header"
 import SiteFooter from "@/shared/components/site-footer"
 import type { ApplicationFormData } from "@/features/application/types"
 import type { JobDetail } from "@/features/jobs/types"
+import { isExternalJobId } from "@/features/external-jobs/apply-id"
 import { applicationFormSchema, type ApplicationFormValues } from "@/features/application/schema"
 import { useApplySourceCapture } from "@/features/application/hooks/useApplySourceCapture"
 import {
@@ -29,7 +30,8 @@ export interface ApplicationFormProps {
 }
 
 export default function ApplicationForm({ job }: ApplicationFormProps) {
-  const catalogEligible = job ? isMetaCatalogJob(job) : false
+  // 外部求人はMetaカタログに存在しないIDのため content_ids に載せない（カタログ計測の破損防止）
+  const catalogEligible = job ? isMetaCatalogJob(job) && !isExternalJobId(job.id) : false
   const {
     register,
     handleSubmit,

@@ -147,20 +147,13 @@ export default function HubPage({
           </h2>
           {summary && <p className="mt-3 text-gray-700 leading-relaxed">{summary}</p>}
           <dl className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {/* 外部求人があるハブでは「掲載件数」を1つにまとめず内訳で出す。
-                応募・相談できるのは RIDE JOB 掲載分だけなので合算表示は誤認を招く。 */}
+            {/* 掲載件数はページに実際に並ぶ求人の合計（媒体別の内訳は出さない）。 */}
             <div className="rounded-lg bg-gray-50 p-3">
-              <dt className="text-xs text-gray-500">
-                {external ? "RIDE JOB掲載" : "掲載件数"}
-              </dt>
-              <dd className="text-lg font-bold text-gray-900">{totalCount}件</dd>
+              <dt className="text-xs text-gray-500">掲載件数</dt>
+              <dd className="text-lg font-bold text-gray-900">
+                {totalCount + (external?.count ?? 0)}件
+              </dd>
             </div>
-            {external && (
-              <div className="rounded-lg bg-gray-50 p-3">
-                <dt className="text-xs text-gray-500">ハローワーク公開求人</dt>
-                <dd className="text-lg font-bold text-gray-900">{external.count}件</dd>
-              </div>
-            )}
             {stats.salaryText && (
               <div className="rounded-lg bg-gray-50 p-3">
                 <dt className="text-xs text-gray-500">給与レンジ</dt>

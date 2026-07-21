@@ -2,9 +2,9 @@ import Link from "next/link"
 import type { ExternalJob } from "@/features/external-jobs/types"
 
 /**
- * ハローワーク転載求人のセクション（ハブ内で自社求人とは別枠・出典明記）。
- * コンプラ担保: ①出典明記 ③「運営：株式会社PM Agent」 ④公式誤認防止の注記
- * ⑧画像・地図は出さない（テキストのみ） ＋ 応募は自社フォームに流さず自社求人へクロスセル。
+ * 提携媒体から取り込んだ求人のセクション（ハブ内）。
+ * 表示方針（2026-07-21 三木さん決定）: 取得元の表記は出さず、カード・CTAとも他の求人と同じ扱いにする。
+ * データ側の担保は維持: 求人票画像・企業画像・地図は保持しない（テキストのみ）／掲載終了・取消は非表示。
  */
 
 function salaryText(j: ExternalJob): string | undefined {
@@ -26,9 +26,6 @@ function ExternalJobCard({ job }: { job: ExternalJob }) {
       href={`/external-job/${job.source}/${encodeURIComponent(job.sourceId)}`}
       className="group flex flex-col rounded-lg border border-gray-200 bg-white p-4 transition-colors hover:border-primary"
     >
-      <span className="mb-2 inline-flex w-fit items-center rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
-        ハローワーク公開求人
-      </span>
       <h3 className="line-clamp-2 font-semibold text-gray-900 group-hover:underline">
         {job.title || "求人"}
       </h3>
@@ -53,7 +50,6 @@ function ExternalJobCard({ job }: { job: ExternalJob }) {
           </div>
         )}
       </dl>
-      <p className="mt-3 text-xs text-gray-400">出典：{job.sourceName}</p>
     </Link>
   )
 }
@@ -63,7 +59,7 @@ interface Props {
   count: number
   region: string
   catName: string
-  /** 自社（RIDE JOB紹介）求人の一覧・相談へ誘導するリンク先 */
+  /** さらに探すためのリンク先（絞り込み検索） */
   selfJobsHref: string
 }
 
@@ -73,16 +69,10 @@ export default function ExternalJobsSection({ jobs, count, region, catName, self
     <section className="mt-12" aria-labelledby="hub-external">
       <h2
         id="hub-external"
-        className="text-xl font-bold text-gray-900 border-l-4 border-gray-300 pl-3"
+        className="text-xl font-bold text-gray-900 border-l-4 border-primary pl-3"
       >
-        {region}の{catName}の公開求人（ハローワーク）
+        {region}の{catName}の求人をもっと見る
       </h2>
-      {/* コンプラ: 出典・運営・公式誤認防止の注記 */}
-      <p className="mt-3 rounded-lg bg-gray-50 p-3 text-xs leading-relaxed text-gray-500">
-        以下は<strong className="font-semibold text-gray-600">ハローワークインターネットサービス</strong>
-        の公開求人を転載したものです。ハローワーク公式サイトではありません。内容は各ハローワークの
-        求人票が最新です。RIDE JOB（運営：株式会社PM Agent）が紹介・仲介する求人ではありません。
-      </p>
 
       <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
         {jobs.map((j) => (
@@ -91,24 +81,15 @@ export default function ExternalJobsSection({ jobs, count, region, catName, self
       </div>
 
       {count > jobs.length && (
-        <p className="mt-4 text-sm text-gray-500">
-          このほかにも{region}の{catName}の公開求人が{count.toLocaleString()}件あります。
-        </p>
+        <div className="mt-8 text-center">
+          <Link
+            href={selfJobsHref}
+            className="inline-flex min-h-[48px] items-center justify-center rounded-lg bg-primary px-6 py-3 font-bold text-primary-foreground transition-opacity hover:opacity-90"
+          >
+            条件を絞り込んで探す
+          </Link>
+        </div>
       )}
-
-      {/* 応募導線の切り分け: 応募・相談は自社（RIDE JOB紹介）求人へ */}
-      <div className="mt-6 rounded-lg border border-primary/30 bg-primary/5 p-4">
-        <p className="text-sm text-gray-700">
-          RIDE JOB のキャリアアドバイザーに<strong className="font-semibold">応募・相談</strong>
-          できるのは、上部で紹介している RIDE JOB 掲載の求人です。
-        </p>
-        <Link
-          href={selfJobsHref}
-          className="mt-3 inline-flex items-center justify-center min-h-[44px] rounded-lg bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground transition-opacity hover:opacity-90"
-        >
-          RIDE JOB が紹介する{catName}求人を見る
-        </Link>
-      </div>
     </section>
   )
 }

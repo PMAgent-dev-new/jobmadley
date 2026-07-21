@@ -23,6 +23,7 @@ import { sendApplicantSms, type SmsChannel } from "@/shared/sms/applicantSms"
 import { sendMetaCapiLead } from "@/shared/meta/capi"
 import { detectTestApplication, type TestDetection } from "@/shared/application/testDetection"
 import { isMetaCatalogJob } from "@/shared/lib/catalog-eligibility"
+import { isExternalJobId } from "@/features/external-jobs/apply-id"
 
 interface ApplicationPayload {
   lastName?: string
@@ -423,7 +424,8 @@ export async function POST(request: Request) {
           fbc: readCookie(cookieHeader, "_fbc"),
           clientIpAddress: clientIp,
           clientUserAgent: request.headers.get("user-agent") ?? undefined,
-          contentIds: incoming.jobId && isMetaCatalogJob({
+          // 外部求人IDはMetaカタログに存在しないため content_ids に載せない
+          contentIds: incoming.jobId && !isExternalJobId(incoming.jobId) && isMetaCatalogJob({
             jobName: incoming.jobName,
             jobCategory: { name: incoming.jobCategoryName },
           }) ? [incoming.jobId] : undefined,

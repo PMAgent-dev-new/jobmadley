@@ -28,6 +28,9 @@ const HUB_SLUG_TO_EXTERNAL_CATEGORIES: Record<string, string[]> = {
   "hire-driver": ["ハイヤー・役員運転手"],
   "bus-driver": ["バス運転手"],
   "truck-driver": ["トラックドライバー", "配送・宅配ドライバー"],
+  // 整備士系（2026-07-21 取得範囲に追加）
+  "car-mechanic": ["自動車整備士"],
+  "bike-mechanic": ["バイク整備士"],
 }
 
 export const hasExternalJobsForCategory = (hubCatSlug?: string): boolean =>
@@ -40,9 +43,14 @@ const EXTERNAL_CATEGORY_TO_HUB: Record<string, string> = {
   バス運転手: "bus-driver",
   トラックドライバー: "truck-driver",
   "配送・宅配ドライバー": "truck-driver",
+  自動車整備士: "car-mechanic",
+  バイク整備士: "bike-mechanic",
 }
 export const hubSlugForExternalCategory = (cat?: string): string | undefined =>
   cat ? EXTERNAL_CATEGORY_TO_HUB[cat] : undefined
+
+// 応募IDの接頭辞ユーティリティは client からも読むため apply-id.ts に分離（キーの混入防止）。
+export { externalApplyId, parseExternalApplyId, isExternalJobId } from "./apply-id"
 
 /** PostgREST の行（snake_case）→ ExternalJob（camelCase）。 */
 function mapRow(r: Record<string, unknown>): ExternalJob {
