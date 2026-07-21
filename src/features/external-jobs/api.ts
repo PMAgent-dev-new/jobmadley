@@ -19,6 +19,17 @@ const VIEW = "external_public_jobs"
 const REVALIDATE = 3600
 
 /**
+ * 画面で使う列だけを取得する。取得元を示す列（source_name / source_url / hw_office）は
+ * 表示しない方針のため、そもそも取りに行かない。取得するとレンダリング結果に含まれず
+ * ともRSCペイロードへ載り、ページのソースから読めてしまう。
+ */
+const SELECT_COLUMNS = [
+  "source", "source_id", "title", "company_name", "prefecture", "address",
+  "job_category", "employment_type", "salary_kind", "salary_min", "salary_max",
+  "salary_raw", "work_hours", "description",
+].join(",")
+
+/**
  * 自社ハブの職種 slug → 外部の job_category 名。複数の外部カテゴリを1ハブに合流させる
  * （例: truck-driver には「トラック」と「配送・宅配」を集約）。ここに無い slug は外部求人を出さない。
  * 送迎ドライバー・その他ドライバーは自社に対応ハブが無いため初期スコープ外（将来カテゴリ新設で回収）。
@@ -31,6 +42,8 @@ const HUB_SLUG_TO_EXTERNAL_CATEGORIES: Record<string, string[]> = {
   // 整備士系（2026-07-21 取得範囲に追加）
   "car-mechanic": ["自動車整備士"],
   "bike-mechanic": ["バイク整備士"],
+  // 送迎（2026-07-21 カテゴリ新設。自社ハブが無く未表示だった在庫を回収）
+  "shuttle-driver": ["送迎ドライバー"],
 }
 
 export const hasExternalJobsForCategory = (hubCatSlug?: string): boolean =>
@@ -45,6 +58,7 @@ const EXTERNAL_CATEGORY_TO_HUB: Record<string, string> = {
   "配送・宅配ドライバー": "truck-driver",
   自動車整備士: "car-mechanic",
   バイク整備士: "bike-mechanic",
+  送迎ドライバー: "shuttle-driver",
 }
 export const hubSlugForExternalCategory = (cat?: string): string | undefined =>
   cat ? EXTERNAL_CATEGORY_TO_HUB[cat] : undefined
@@ -59,7 +73,7 @@ function mapRow(r: Record<string, unknown>): ExternalJob {
   return {
     source: String(r.source ?? ""),
     sourceId: String(r.source_id ?? ""),
-    sourceName: String(r.source_name ?? "ハローワークインターネットサービス"),
+    sourceName: String(r.source_name ?? ""),
     sourceUrl: str(r.source_url),
     hwOffice: str(r.hw_office),
     title: str(r.title),
@@ -128,6 +142,7 @@ export const getExternalJobsForHub = async (params: {
   const inList = `(${cats.map((c) => `"${c}"`).join(",")})`
   const { rows, count } = await query(
     {
+      select: SELECT_COLUMNS,
       prefecture: `eq.${params.prefectureRegion}`,
       job_category: `in.${inList}`,
       order: "last_seen.desc",
@@ -147,7 +162,12 @@ export const getExternalJobsForCategory = async (params: {
   if (!cats) return { jobs: [], count: 0 }
   const inList = `(${cats.map((c) => `"${c}"`).join(",")})`
   const { rows, count } = await query(
-    { job_category: `in.${inList}`, order: "last_seen.desc", limit: String(params.limit ?? 24) },
+    {
+      select: SELECT_COLUMNS,
+      job_category: `in.${inList}`,
+      order: "last_seen.desc",
+      limit: String(params.limit ?? 24),
+    },
     true,
   )
   return { jobs: rows, count }
@@ -228,6 +248,7 @@ export const getExternalJob = async (
   sourceId: string,
 ): Promise<ExternalJob | null> => {
   const { rows } = await query({
+    select: SELECT_COLUMNS,
     source: `eq.${source}`,
     source_id: `eq.${sourceId}`,
     limit: "1",
