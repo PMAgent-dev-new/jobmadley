@@ -94,20 +94,8 @@ export const hubLead = {
    * externalCount はハローワーク転載求人の件数。タイトルの件数は自社＋外部の合算にしているため、
    * リード文では内訳を明示して「RIDE JOBが紹介できる求人数」と混同されないようにする。
    */
-  prefectureCategory: (region: string, catName: string, count: number, externalCount = 0) => {
-    if (externalCount <= 0) {
-      return `${region}の${catName}求人を${count}件掲載しています。未経験歓迎・寮完備・高収入など、${region}で働く${catName}の最新求人情報をまとめました。気になる求人はそのまま応募・相談できます。`
-    }
-    const breakdown =
-      count > 0
-        ? `（RIDE JOB紹介求人${count}件／ハローワーク公開求人${externalCount}件）`
-        : `（すべてハローワークの公開求人です）`
-    const cta =
-      count > 0
-        ? "RIDE JOB紹介求人はそのまま応募・相談できます。"
-        : "RIDE JOBのキャリアアドバイザーに相談できる求人は、他の地域・職種からお探しいただけます。"
-    return `${region}の${catName}求人を${count + externalCount}件掲載しています${breakdown}。未経験歓迎・寮完備・高収入など、${region}で働く${catName}の最新求人情報をまとめました。${cta}`
-  },
+  prefectureCategory: (region: string, catName: string, count: number, externalCount = 0) =>
+    `${region}の${catName}求人を${count + externalCount}件掲載しています。未経験歓迎・寮完備・高収入など、${region}で働く${catName}の最新求人情報をまとめました。気になる求人はそのまま応募・相談できます。`,
   prefecture: (region: string, count: number) =>
     `${region}のタクシードライバー・自動車整備士・ドライバー職などの求人を${count}件掲載しています。職種から絞り込んで、${region}で働ける最新の求人情報を探せます。`,
   category: (catName: string, count: number) =>
@@ -289,12 +277,7 @@ export const buildHubFaqs = (params: {
   const salaryNote = stats.salaryText ? `。給与は${stats.salaryText}が中心です` : ""
   faqs.push({
     question: `${region ?? "全国"}の${c}求人は何件ありますか？`,
-    answer:
-      externalCount > 0
-        ? stats.count > 0
-          ? `RIDE JOB（ライドジョブ）が紹介する${c}求人を${stats.count}件、あわせてハローワークの公開求人を${externalCount}件掲載しています${salaryNote}。応募・相談ができるのはRIDE JOB紹介求人です。`
-          : `${region ?? "全国"}の${c}については、ハローワークの公開求人を${externalCount}件掲載しています。現在RIDE JOBが紹介できる${c}求人はこの地域にはないため、応募・相談は他の地域・職種の求人からお願いします。`
-        : `RIDE JOB（ライドジョブ）では${region ?? "全国"}の${c}求人を${stats.count}件掲載しています${salaryNote}。`,
+    answer: `RIDE JOB（ライドジョブ）では${region ?? "全国"}の${c}求人を${stats.count + externalCount}件掲載しています${salaryNote}。`,
   })
 
   const lic = catSlug ? catContent[catSlug]?.license : undefined
