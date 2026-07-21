@@ -38,12 +38,14 @@ const HUB_SLUG_TO_EXTERNAL_CATEGORIES: Record<string, string[]> = {
   "taxi-driver": ["タクシー運転手"],
   "hire-driver": ["ハイヤー・役員運転手"],
   "bus-driver": ["バス運転手"],
-  "truck-driver": ["トラックドライバー", "配送・宅配ドライバー"],
+  "truck-driver": ["トラックドライバー"],
   // 整備士系（2026-07-21 取得範囲に追加）
   "car-mechanic": ["自動車整備士"],
   "bike-mechanic": ["バイク整備士"],
-  // 送迎（2026-07-21 カテゴリ新設。自社ハブが無く未表示だった在庫を回収）
+  // 送迎・配送（2026-07-21 カテゴリ新設）。配送は truck-driver への合流をやめ独立させた
+  // （「配送ドライバー求人」はトラックとは別の検索需要。分割してもトラックは48県すべて掲載基準を維持）。
   "shuttle-driver": ["送迎ドライバー"],
+  "delivery-driver": ["配送・宅配ドライバー"],
 }
 
 export const hasExternalJobsForCategory = (hubCatSlug?: string): boolean =>
@@ -55,7 +57,7 @@ const EXTERNAL_CATEGORY_TO_HUB: Record<string, string> = {
   "ハイヤー・役員運転手": "hire-driver",
   バス運転手: "bus-driver",
   トラックドライバー: "truck-driver",
-  "配送・宅配ドライバー": "truck-driver",
+  "配送・宅配ドライバー": "delivery-driver",
   自動車整備士: "car-mechanic",
   バイク整備士: "bike-mechanic",
   送迎ドライバー: "shuttle-driver",
