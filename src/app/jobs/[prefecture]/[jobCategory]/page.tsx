@@ -3,7 +3,13 @@ import type { Metadata } from "next"
 import HubPage from "@/features/hub/components/hub-page"
 import { getJobsPaged, getJobsForStats } from "@/features/jobs/api"
 import { getMediaArticlesByKeyword } from "@/features/media/api"
-import { getExternalJobsForHub, hasExternalJobsForCategory } from "@/features/external-jobs/api"
+import {
+  getExternalJobsForHub,
+  getExternalHubCounts,
+  hasExternalJobsForCategory,
+  externalHubKey,
+  qualifiesByExternalJobs,
+} from "@/features/external-jobs/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
 import {
   HUB_MIN_JOBS,
@@ -46,11 +52,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     return { title: "求人が見つかりません", robots: { index: false, follow: false } }
   }
   const count = prefCatCount(matrix, pref.id, cat.id)
+  // タイトルの件数はページに実際に並ぶ求人数＝自社＋ハローワーク転載の合算。
+  // 自社0件のハブでも「｜0件」とは出さない（内訳は概要セクションとリード文で明示）。
+  const externalCount = hasExternalJobsForCategory(cat.slug)
+    ? (await getExternalHubCounts())[externalHubKey(pref.region, cat.slug!)] ?? 0
+    : 0
   const base = hubUrl.prefectureCategory(pref.slug!, cat.slug!)
   const content = await getHubContent(base)
   return generateHubMetadata({
-    title: `${hubTitle.prefectureCategory(pref.region, cat.name)}｜${count}件`,
-    description: content?.lead || hubLead.prefectureCategory(pref.region, cat.name, count),
+    title: `${hubTitle.prefectureCategory(pref.region, cat.name)}｜${count + externalCount}件`,
+    description:
+      content?.lead || hubLead.prefectureCategory(pref.region, cat.name, count, externalCount),
     canonicalPath: base,
   })
 }
@@ -69,13 +81,26 @@ export default async function Page({ params }: Props) {
     limit: HUB_PAGE_SIZE,
   })
 
-  // 関連ハブ: 同じ県の他職種 / 同じ職種の他県（いずれも生成対象＝件数しきい値以上のみ）
+  // 関連ハブ: 同じ県の他職種 / 同じ職種の他県。
+  // 生成対象の判定は sitemap と揃える（自社しきい値 or 外部求人しきい値）。揃えないと、
+  // sitemap には載るが内部リンクが1本も無い孤立ハブが生まれる。
+  const externalCounts = await getExternalHubCounts()
   const sameKenOtherCat = withSlug(categories)
-    .filter((c) => c.id !== cat.id && prefCatCount(matrix, pref.id, c.id) >= HUB_MIN_JOBS)
+    .filter(
+      (c) =>
+        c.id !== cat.id &&
+        (prefCatCount(matrix, pref.id, c.id) >= HUB_MIN_JOBS ||
+          qualifiesByExternalJobs(externalCounts, pref.region, c.slug)),
+    )
     .map((c) => ({ label: `${pref.region}の${c.name}`, href: hubUrl.prefectureCategory(pref.slug!, c.slug) }))
 
   const sameCatOtherKen = withSlug(prefectures)
-    .filter((p) => p.id !== pref.id && prefCatCount(matrix, p.id, cat.id) >= HUB_MIN_JOBS)
+    .filter(
+      (p) =>
+        p.id !== pref.id &&
+        (prefCatCount(matrix, p.id, cat.id) >= HUB_MIN_JOBS ||
+          qualifiesByExternalJobs(externalCounts, p.region, cat.slug!)),
+    )
     .map((p) => ({ label: `${p.region}の${cat.name}`, href: hubUrl.prefectureCategory(p.slug, cat.slug!) }))
 
   const label = `${pref.region}の${cat.name}`
@@ -121,7 +146,10 @@ export default async function Page({ params }: Props) {
         { name: `${cat.name}求人` },
       ]}
       h1={`${label}求人`}
-      lead={content?.lead || hubLead.prefectureCategory(pref.region, cat.name, totalCount)}
+      lead={
+        content?.lead ||
+        hubLead.prefectureCategory(pref.region, cat.name, totalCount, external?.count ?? 0)
+      }
       bodyHtml={content?.body}
       summaryLabel={label}
       summary={buildHubSummary(label, stats)}
@@ -130,7 +158,13 @@ export default async function Page({ params }: Props) {
       jobs={jobs}
       jobLinks={jobLinks}
       categoryContent={cc ? { catName: cat.name, ...cc } : undefined}
-      faqs={buildHubFaqs({ region: pref.region, catName: cat.name, catSlug: cat.slug!, stats })}
+      faqs={buildHubFaqs({
+        region: pref.region,
+        catName: cat.name,
+        catSlug: cat.slug!,
+        stats,
+        externalCount: external?.count ?? 0,
+      })}
       relatedArticles={relatedArticles}
       external={external}
       moreHref={moreHref}

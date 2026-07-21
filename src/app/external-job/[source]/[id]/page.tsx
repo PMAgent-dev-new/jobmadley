@@ -4,6 +4,7 @@ import Link from "next/link"
 import SiteHeader from "@/shared/components/site-header"
 import SiteFooter from "@/shared/components/site-footer"
 import { getExternalJob, hubSlugForExternalCategory } from "@/features/external-jobs/api"
+import { getJobCategories } from "@/features/master/job-categories"
 
 /**
  * ハローワーク転載求人の詳細ページ（Tier2）。
@@ -50,6 +51,11 @@ export default async function Page({ params }: Props) {
 
   const hubSlug = hubSlugForExternalCategory(job.jobCategory)
   const selfHref = hubSlug ? `/jobs/category/${hubSlug}` : "/search"
+  // パンくずのラベルはリンク先ハブの職種名を使う。外部側のカテゴリ名（例「配送・宅配ドライバー」）を
+  // そのまま出すと、リンク先の /jobs/category/truck-driver＝「トラックドライバー」と表示がずれる。
+  const hubCatName = hubSlug
+    ? (await getJobCategories()).find((c) => c.slug === hubSlug)?.name
+    : undefined
   const salary =
     job.salaryRaw ||
     (job.salaryMin || job.salaryMax
@@ -72,11 +78,11 @@ export default async function Page({ params }: Props) {
               </Link>
             </li>
             <li className="text-gray-400">/</li>
-            {hubSlug && (
+            {hubSlug && hubCatName && (
               <>
                 <li>
                   <Link href={`/jobs/category/${hubSlug}`} className="hover:underline">
-                    {job.jobCategory}
+                    {hubCatName}
                   </Link>
                 </li>
                 <li className="text-gray-400">/</li>

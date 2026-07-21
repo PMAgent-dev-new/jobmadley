@@ -7,6 +7,7 @@
  * 公開データ（掲載中の求人）への read しか許可されない。env（SUPABASE_URL / SUPABASE_ANON_KEY）優先・
  * フォールバックを置くことで Vercel env 未設定でもデプロイ直後から動作する。env で上書き推奨。
  */
+import { unstable_cache } from "next/cache"
 import type { ExternalJob } from "./types"
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://urvkgyohtqfxmymaivth.supabase.co"
@@ -71,10 +72,10 @@ function mapRow(r: Record<string, unknown>): ExternalJob {
   }
 }
 
-async function query(
+async function rawQuery(
   params: Record<string, string>,
   wantCount = false,
-): Promise<{ rows: ExternalJob[]; count: number }> {
+): Promise<{ rows: Record<string, unknown>[]; count: number }> {
   const qs = new URLSearchParams(params).toString()
   const url = `${SUPABASE_URL}/rest/v1/${VIEW}?${qs}`
   const headers: Record<string, string> = {
@@ -93,11 +94,19 @@ async function query(
       const total = cr?.split("/")?.[1]
       if (total && total !== "*") count = Number(total)
     }
-    return { rows: data.map(mapRow), count }
+    return { rows: data, count }
   } catch {
     // 障害時は外部求人セクションを出さない（自社ページは無傷）。
     return { rows: [], count: 0 }
   }
+}
+
+async function query(
+  params: Record<string, string>,
+  wantCount = false,
+): Promise<{ rows: ExternalJob[]; count: number }> {
+  const { rows, count } = await rawQuery(params, wantCount)
+  return { rows: rows.map(mapRow), count }
 }
 
 /** ハブ（県×職種）向けの外部求人と総件数。県は prefectures.region（例「東京都」）＝外部 prefecture と一致。 */
@@ -135,6 +144,75 @@ export const getExternalJobsForCategory = async (params: {
   )
   return { jobs: rows, count }
 }
+
+/**
+ * 外部求人だけでハブを「生成対象」に昇格させる最小件数。
+ * 自社求人の HUB_MIN_JOBS(=5) と役割は同じだが、外部は在庫が桁違いに厚いので
+ * 薄いページを増やさないよう高めに置く（20件＝107ハブ／対象在庫の97%をカバー）。
+ */
+export const HUB_MIN_EXTERNAL_JOBS = 20
+
+/** 件数マトリクスのキー。prefecture は prefectures.region（例「東京都」）。 */
+export const externalHubKey = (prefectureRegion: string, hubCatSlug: string): string =>
+  `${prefectureRegion}|${hubCatSlug}`
+
+export type ExternalHubCounts = Record<string, number>
+
+const COUNT_PAGE = 1000
+/** 暴走防止の上限（現状の対象在庫は約1.8万件）。 */
+const COUNT_MAX_PAGES = 40
+
+/**
+ * 県×職種ごとの外部求人件数マトリクス。sitemap 掲載判定と関連リンクの出し分けに使う。
+ *
+ * この Supabase では PostgREST の集約関数（count()）が無効（PGRST123）なため、
+ * 対象職種の (prefecture, job_category) だけを射影して全件取得し、アプリ側で数える。
+ * 1行あたり数十バイト・約1.8万行で、各ページ取得は fetch キャッシュに載る。
+ * 失敗時は空を返す＝外部求人ゼロ扱いとなり、自社求人だけの従来挙動に戻る（加算的設計）。
+ */
+export const getExternalHubCounts = unstable_cache(
+  async (): Promise<ExternalHubCounts> => {
+    const cats = Object.keys(EXTERNAL_CATEGORY_TO_HUB)
+    const inList = `(${cats.map((c) => `"${c}"`).join(",")})`
+    const page = (offset: number, wantCount = false) =>
+      rawQuery(
+        {
+          select: "prefecture,job_category",
+          job_category: `in.${inList}`,
+          order: "source_id.asc",
+          limit: String(COUNT_PAGE),
+          offset: String(offset),
+        },
+        wantCount,
+      )
+
+    const first = await page(0, true)
+    if (first.rows.length === 0) return {}
+    const pages = Math.min(Math.ceil(first.count / COUNT_PAGE), COUNT_MAX_PAGES)
+    const rest = await Promise.all(
+      Array.from({ length: pages - 1 }, (_, i) => page((i + 1) * COUNT_PAGE)),
+    )
+
+    const counts: ExternalHubCounts = {}
+    for (const row of [first, ...rest].flatMap((p) => p.rows)) {
+      const slug = EXTERNAL_CATEGORY_TO_HUB[String(row.job_category ?? "")]
+      const region = String(row.prefecture ?? "")
+      if (!slug || !region) continue
+      const key = externalHubKey(region, slug)
+      counts[key] = (counts[key] ?? 0) + 1
+    }
+    return counts
+  },
+  ["external-hub-counts"],
+  { revalidate: REVALIDATE },
+)
+
+/** そのハブが「外部求人だけで生成対象になる」か。 */
+export const qualifiesByExternalJobs = (
+  counts: ExternalHubCounts,
+  prefectureRegion: string,
+  hubCatSlug: string,
+): boolean => (counts[externalHubKey(prefectureRegion, hubCatSlug)] ?? 0) >= HUB_MIN_EXTERNAL_JOBS
 
 /** 外部求人1件（詳細ページ用）。存在しなければ null。 */
 export const getExternalJob = async (
