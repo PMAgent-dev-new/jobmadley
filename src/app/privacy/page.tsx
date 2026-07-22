@@ -32,7 +32,7 @@ export default function PrivacyPolicyPage() {
           <li>
             <h2 className="font-semibold text-base mb-2">1. 事業者情報</h2>
             <p>法人名：株式会社PM Agent</p>
-            <p>住所：〒150-0001　東京都渋谷区神宮前1丁目9番地3 原宿第3コーポ4階402号室</p>
+            <p>住所：〒150-0041　東京都渋谷区神南１−６−５ Shibuya WayP ８−４</p>
             <p>代表：梅津　哲豪</p>
           </li>
 
