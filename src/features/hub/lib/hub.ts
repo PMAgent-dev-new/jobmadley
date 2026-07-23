@@ -84,6 +84,20 @@ const HUB_ARTICLE_KEYWORDS: Record<string, string> = {
 export const hubArticleKeyword = (catSlug?: string): string | undefined =>
   catSlug ? HUB_ARTICLE_KEYWORDS[catSlug] : undefined
 
+/**
+ * カテゴリ名の検索シノニム。タイトル・H1・リード文に併記して検索語をカバーする。
+ * GSC実測で「表示はあるが順位が伸びない」別名がある職種のみ登録する
+ * （例: bike-mechanic は「二輪整備士 募集/派遣」系クエリで表示830件超・平均14〜18位）。
+ */
+export const HUB_CATEGORY_SYNONYMS: Record<string, string> = {
+  "bike-mechanic": "二輪整備士",
+}
+export const hubCategorySynonym = (catSlug?: string): string | undefined =>
+  catSlug ? HUB_CATEGORY_SYNONYMS[catSlug] : undefined
+/** シノニムがあれば「バイク整備士（二輪整備士）」の形で併記した名称を返す */
+export const catNameWithSynonym = (catName: string, synonym?: string): string =>
+  synonym ? `${catName}（${synonym}）` : catName
+
 /** 全件を見るための絞り込み検索URL（/search はUI用・noindex） */
 export const searchUrl = (params: { prefectureId?: string; jobCategoryId?: string }) => {
   const q = new URLSearchParams()
@@ -103,14 +117,14 @@ export const hubLead = {
     `${region}の${catName}求人を${count + externalCount}件掲載しています。未経験歓迎・寮完備・高収入など、${region}で働く${catName}の最新求人情報をまとめました。気になる求人はそのまま応募・相談できます。`,
   prefecture: (region: string, count: number) =>
     `${region}のタクシードライバー・自動車整備士・ドライバー職などの求人を${count}件掲載しています。職種から絞り込んで、${region}で働ける最新の求人情報を探せます。`,
-  category: (catName: string, count: number) =>
-    `${catName}の求人を全国で${count}件掲載しています。地域から絞り込んで、未経験歓迎や高収入などの条件に合う${catName}の求人を探せます。`,
+  category: (catName: string, count: number, synonym?: string) =>
+    `${catNameWithSynonym(catName, synonym)}の求人を全国で${count}件掲載しています。正社員の中途採用から未経験歓迎の募集まで、地域から絞り込んで条件に合う${catName}の求人を探せます。`,
 }
 
 export const hubTitle = {
   prefectureCategory: (region: string, catName: string) => `${region}の${catName}求人・転職`,
   prefecture: (region: string) => `${region}のドライバー・整備士求人・転職`,
-  category: (catName: string) => `${catName}の求人・転職（全国）`,
+  category: (catName: string, synonym?: string) => `${catNameWithSynonym(catName, synonym)}の求人・転職（全国）`,
 }
 
 /**
@@ -211,7 +225,7 @@ export const catContent: Record<
     career: "見習いから2級・1級整備士、検査員(自動車検査員)、フロント(サービスアドバイザー)、工場長へとステップアップできます。資格手当で収入も上がりやすく、長く安定して働ける職種です。",
   },
   "bike-mechanic": {
-    work: "バイク整備士は、オートバイの点検・整備・修理・カスタムを行う仕事です。エンジンや電装系の知識を活かし、車検対応から日常メンテナンスまで担当します。バイク好きにとっては趣味を仕事にできる職種です。",
+    work: "バイク整備士（二輪整備士）は、オートバイの点検・整備・修理・カスタムを行う仕事です。エンジンや電装系の知識を活かし、車検対応から日常メンテナンスまで担当します。求人は正社員の中途採用が中心で、未経験歓迎の募集もあり、バイク好きにとっては趣味を仕事にできる職種です。",
     license: "二輪自動車整備士などの資格があると有利ですが、未経験から始められる求人もあり、専門スクールと連携して働きながら学べる環境も増えています。",
     career: "整備スキルを高めて主任整備士やショップ店長、カスタムの専門職へと進めます。二輪需要の高い都市部を中心に安定した求人があります。",
   },

@@ -9,9 +9,10 @@ import { normalizeCmsText } from '@/shared/lib/utils'
 // ブランド名（titleテンプレートのサフィックス）。旧値は説明文入り全角38字で、
 // 求人詳細のtitleが60〜80字になりSERPで切断・書き換えが発生していた（基準28〜32字）。
 export const SITE_NAME = 'ライドジョブ'
-// トップページ専用のフルタイトル（主要KWを含む説明付き）
-export const TOP_TITLE = 'ライドジョブ | タクシードライバー・自動車整備士・デリバリーの求人・転職サイト'
-export const SITE_DESCRIPTION = 'タクシードライバー、自動車整備士、フードデリバリー営業など、暮らしと街を支える仕事の求人情報サイト。あなたにぴったりの転職先を見つけよう。'
+// トップページ専用のフルタイトル。主要KW（タクシー転職・求人）を先頭に置く
+// （GSC実測: 「タクシー 転職/求人」系クエリで9〜13位・クリック0のため、ブランド先頭→KW先頭に変更）
+export const TOP_TITLE = 'タクシードライバー・自動車整備士の求人・転職サイト｜ライドジョブ'
+export const SITE_DESCRIPTION = 'タクシードライバー・自動車整備士・ドライバー職の求人・転職サイト「ライドジョブ」。未経験歓迎・高収入・寮完備などの条件から探せて、専任アドバイザーが転職を無料でサポートします。'
 export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://ridejob.jp'
 export const OPERATOR_NAME = '株式会社PM Agent'
 const OGP_IMAGE = '/images/OGP.png'
