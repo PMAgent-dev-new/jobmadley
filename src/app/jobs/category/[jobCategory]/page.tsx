@@ -21,6 +21,8 @@ import {
   groupForCatSlug,
   getHubContent,
   hubArticleKeyword,
+  hubCategorySynonym,
+  catNameWithSynonym,
 } from "@/features/hub/lib/hub"
 
 // オンデマンドISR（generateStaticParams=[] で動的セグメントをISR化）。ページングは廃止し
@@ -43,9 +45,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const count = matrix.byCategory[cat.id] ?? 0
   const base = hubUrl.category(cat.slug!)
   const content = await getHubContent(base)
+  const synonym = hubCategorySynonym(cat.slug ?? undefined)
   return generateHubMetadata({
-    title: `${hubTitle.category(cat.name)}｜${count}件`,
-    description: content?.lead || hubLead.category(cat.name, count),
+    title: `${hubTitle.category(cat.name, synonym)}｜${count}件`,
+    description: content?.lead || hubLead.category(cat.name, count, synonym),
     canonicalPath: base,
   })
 }
@@ -99,8 +102,8 @@ export default async function Page({ params }: Props) {
         { name: "トップ", url: "/" },
         { name: `${cat.name}の求人` },
       ]}
-      h1={`${cat.name}の求人・転職（全国）`}
-      lead={content?.lead || hubLead.category(cat.name, totalCount)}
+      h1={`${catNameWithSynonym(cat.name, hubCategorySynonym(cat.slug ?? undefined))}の求人・転職（全国）`}
+      lead={content?.lead || hubLead.category(cat.name, totalCount, hubCategorySynonym(cat.slug ?? undefined))}
       bodyHtml={content?.body}
       summaryLabel={`${cat.name}（全国）`}
       summary={buildHubSummary(`全国の${cat.name}`, stats)}
