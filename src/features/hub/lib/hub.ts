@@ -213,6 +213,25 @@ export const getHubContent = async (hubKey: string): Promise<HubContent | null> 
   return entry ? { hubKey, ...entry } : null
 }
 
+/**
+ * 市区町村×職種ハブのうち「固有本文を用意済み」のエントリ一覧。
+ * sitemap はこのリストにあるものだけを掲載する（＝本文を書いた市区町村から段階的に
+ * index を押し込み、テンプレのみの薄いページを一括投入する scaled content abuse を避ける）。
+ * キー形式: /jobs/{県slug}/{職種slug}/{市区町村名(日本語・非エンコード)}
+ */
+export const getMunicipalityContentEntries = (): {
+  key: string
+  prefSlug: string
+  catSlug: string
+  muniName: string
+}[] =>
+  Object.keys(HUB_CONTENTS)
+    .map((key) => {
+      const m = key.match(/^\/jobs\/([a-z-]+)\/([a-z-]+)\/(.+)$/)
+      return m ? { key, prefSlug: m[1], catSlug: m[2], muniName: m[3] } : null
+    })
+    .filter((e): e is { key: string; prefSlug: string; catSlug: string; muniName: string } => e !== null)
+
 // =====================
 // ハブ本文の独自コンテンツ（thin content 対策）
 // =====================
