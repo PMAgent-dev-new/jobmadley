@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { Button } from "@/shared/ui/button"
 import { Badge } from "@/shared/ui/badge"
-import { isNew, formatSalary, formatDate } from "@/shared/lib/utils"
+import { isNew, formatSalary, formatDate, companySearchQuery } from "@/shared/lib/utils"
 import type { JobDetail } from "@/features/jobs/types"
 
 interface JobTitleActionsProps {
@@ -24,12 +24,17 @@ export default function JobTitleActions({ job, applyUrl, showApplyButton = true 
           <h1 className="text-2xl font-bold text-gray-800 mb-1">
             {job.jobName ?? job.title}
           </h1>
-          {job.companyName ? (
-            <Link href="#" className="text-blue-600 hover:underline">
+          {job.companyName && !job.hideCompanyName ? (
+            // 会社名でキーワード検索（同一企業・グループの他求人へ回遊）。
+            // 旧実装は href="#" のデッドリンクで、リンク価値もUXも失っていた。
+            <Link
+              href={`/search?q=${encodeURIComponent(companySearchQuery(job.companyName))}`}
+              className="text-blue-600 hover:underline"
+            >
               {job.companyName}
             </Link>
           ) : (
-            <span className="text-gray-700">会社情報なし</span>
+            <span className="text-gray-700">{job.companyName ?? "会社情報なし"}</span>
           )}
           {job.tags && job.tags.length > 0 && (
             <div className="flex flex-wrap gap-2 mt-2">
