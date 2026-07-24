@@ -1,4 +1,5 @@
 import type { JobDetail } from "@/features/jobs/types"
+import { formatAccessLines } from "@/features/jobs/format-access"
 import { formatSalary } from "@/shared/lib/utils"
 import JobPhotoGrid from "./job-photo-grid"
 
@@ -147,7 +148,7 @@ export default function JobDescription({ job }: JobDescriptionProps) {
                   {job.addressLine && <p>{job.addressLine}</p>}
                   {job.access && (
                     <div className="mt-2">
-                      {job.access.split('\n').map((line, index) => (
+                      {formatAccessLines(job.access).map((line, index) => (
                         <p key={index} className="text-sm">・{line}</p>
                       ))}
                     </div>
