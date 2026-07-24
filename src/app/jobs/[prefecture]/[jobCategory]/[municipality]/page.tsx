@@ -60,7 +60,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!r) return { title: "求人が見つかりません", robots: { index: false, follow: false } }
   const { pref, cat, muni } = r
   const base = hubUrl.municipalityCategory(pref.slug!, muni.name, cat.slug!)
-  const content = await getHubContent(base)
+  // 本文(hub-contents)のキーは人が編集しやすいよう非エンコードの日本語パスで持つ
+  // （base はURLエンコード済みのため、そのままでは JSON のキーと一致しない）
+  const contentKey = `/jobs/${pref.slug}/${cat.slug}/${muni.name}`
+  const content = await getHubContent(contentKey)
   const [selfCount, ext] = await Promise.all([
     getJobsPaged({ prefectureId: pref.id, municipalityId: muni.id, jobCategoryId: cat.id, limit: 1 }).then(
       (d) => d.totalCount,
@@ -108,8 +111,8 @@ export default async function Page({ params }: Props) {
   if (totalCount + external.count < HUB_MIN_MUNI_JOBS) notFound()
 
   const label = `${muni.name}の${cat.name}`
-  const base = hubUrl.municipalityCategory(pref.slug!, muni.name, cat.slug!)
-  const content = await getHubContent(base)
+  const contentKey = `/jobs/${pref.slug}/${cat.slug}/${muni.name}`
+  const content = await getHubContent(contentKey)
   const stats = { ...computeHubStats(jobs), count: totalCount }
   const cc = catContent[cat.slug!]
 

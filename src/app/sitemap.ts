@@ -10,9 +10,16 @@ import {
   prefCatCount,
   withSlug,
   getHubData,
+  getMunicipalityContentEntries,
 } from "@/features/hub/lib/hub"
 import { FEATURED_COMPANIES, matchesFeaturedCompany } from "@/features/companies/data"
-import { getExternalHubCounts, qualifiesByExternalJobs } from "@/features/external-jobs/api"
+import {
+  getExternalHubCounts,
+  getExternalMuniHubCounts,
+  qualifiesByExternalJobs,
+  externalMuniHubKey,
+  HUB_MIN_MUNI_JOBS,
+} from "@/features/external-jobs/api"
 
 /**
  * 地域×職種ハブページ群のsitemapエントリを生成（生成対象＝全県＋全職種＋しきい値以上の県×職種）。
@@ -39,6 +46,21 @@ const getHubRoutes = async (): Promise<MetadataRoute.Sitemap> => {
         })
       }
     }
+  }
+  // 市区町村×職種ハブ（HACK1）: 固有本文を用意したものだけ掲載する段階投入。
+  // テンプレのみの薄い市区町村ハブを一括で sitemap に押し込むと scaled content abuse に
+  // 直撃するため、本文を書いた市区町村から順に載せる。在庫がしきい値を割った場合
+  // （ページ側は notFound を返す）に sitemap とページが食い違わないよう件数も確認する。
+  const muniCounts = await getExternalMuniHubCounts()
+  for (const e of getMunicipalityContentEntries()) {
+    const pref = prefectures.find((p) => p.slug === e.prefSlug)
+    if (!pref) continue
+    if ((muniCounts[externalMuniHubKey(pref.region, e.muniName, e.catSlug)] ?? 0) < HUB_MIN_MUNI_JOBS) continue
+    routes.push({
+      url: `${SITE_URL}${hubUrl.municipalityCategory(e.prefSlug, e.muniName, e.catSlug)}`,
+      changeFrequency: "daily",
+      priority: 0.7,
+    })
   }
   for (const c of withSlug(categories)) {
     routes.push({ url: `${SITE_URL}${hubUrl.category(c.slug)}`, changeFrequency: "daily", priority: 0.6 })
