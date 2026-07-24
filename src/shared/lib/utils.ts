@@ -5,6 +5,23 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/**
+ * 会社名を検索クエリ用に「核となる社名」へ整える。
+ * 「株式会社レッドバロン 浜松店」→「株式会社レッドバロン」のように末尾の支店/営業所
+ * トークンを落とし、同一企業の他店舗の求人へ回遊できるようにする（多店舗企業の重複求人対策にも効く）。
+ * 「有限会社 佐藤商店」のように落とすと法人格だけになる場合は、社名の一部なので元のまま。
+ */
+export function companySearchQuery(companyName: string): string {
+  const BRANCH = /(営業所|支店|支社|出張所|事業所|事業本部|営業本部|センター|工場|店|営業部|営業課)$/
+  const CORP = /^(株式会社|有限会社|合同会社|合資会社|合名会社|一般社団法人|医療法人|社会福祉法人)$/
+  const tokens = companyName.split(/[\s　]+/).filter(Boolean)
+  while (tokens.length > 1 && BRANCH.test(tokens[tokens.length - 1])) {
+    if (tokens.slice(0, -1).every((t) => CORP.test(t))) break
+    tokens.pop()
+  }
+  return tokens.join(" ")
+}
+
 // =====================
 // 給与表示関連
 // =====================
