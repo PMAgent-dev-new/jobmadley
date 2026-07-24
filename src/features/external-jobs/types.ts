@@ -12,6 +12,7 @@ export interface ExternalJob {
   title?: string
   companyName?: string
   prefecture?: string
+  municipalityName?: string
   address?: string
   jobCategory?: string
   employmentType?: string

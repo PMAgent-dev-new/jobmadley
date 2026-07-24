@@ -24,7 +24,7 @@ const REVALIDATE = 3600
  * ともRSCペイロードへ載り、ページのソースから読めてしまう。
  */
 const SELECT_COLUMNS = [
-  "source", "source_id", "title", "company_name", "prefecture", "address",
+  "source", "source_id", "title", "company_name", "prefecture", "municipality_name", "address",
   "job_category", "employment_type", "salary_kind", "salary_min", "salary_max",
   "salary_raw", "work_hours", "description",
 ].join(",")
@@ -81,6 +81,7 @@ function mapRow(r: Record<string, unknown>): ExternalJob {
     title: str(r.title),
     companyName: str(r.company_name),
     prefecture: str(r.prefecture),
+    municipalityName: str(r.municipality_name),
     address: str(r.address),
     jobCategory: str(r.job_category),
     employmentType: str(r.employment_type),
@@ -148,6 +149,30 @@ export const getExternalJobsForHub = async (params: {
       prefecture: `eq.${params.prefectureRegion}`,
       job_category: `in.${inList}`,
       order: "last_seen.desc",
+      limit: String(params.limit ?? 24),
+    },
+    true,
+  )
+  return { jobs: rows, count }
+}
+
+/** 市区町村×職種ハブ向け。県＋市区町村名で絞る（HACK1: 整備士バーティカルの粒度）。 */
+export const getExternalJobsForMuniHub = async (params: {
+  prefectureRegion: string
+  municipalityName: string
+  hubCatSlug: string
+  limit?: number
+}): Promise<{ jobs: ExternalJob[]; count: number }> => {
+  const cats = HUB_SLUG_TO_EXTERNAL_CATEGORIES[params.hubCatSlug]
+  if (!cats || !params.prefectureRegion || !params.municipalityName) return { jobs: [], count: 0 }
+  const inList = `(${cats.map((c) => `"${c}"`).join(",")})`
+  const { rows, count } = await query(
+    {
+      select: SELECT_COLUMNS,
+      prefecture: `eq.${params.prefectureRegion}`,
+      municipality_name: `eq.${params.municipalityName}`,
+      job_category: `in.${inList}`,
+      order: "received_date.desc.nullslast",
       limit: String(params.limit ?? 24),
     },
     true,
@@ -243,6 +268,58 @@ export const qualifiesByExternalJobs = (
   prefectureRegion: string,
   hubCatSlug: string,
 ): boolean => (counts[externalHubKey(prefectureRegion, hubCatSlug)] ?? 0) >= HUB_MIN_EXTERNAL_JOBS
+
+// --- 市区町村×職種ハブ（HACK1: 整備士バーティカル。競合の粒度に対抗）-----------------
+/** 市区町村ハブの最小件数。薄いページ量産を避けるため県ハブと同じ20を採用。 */
+export const HUB_MIN_MUNI_JOBS = 20
+
+/** 市区町村ハブのキー。prefecture=region（例「岡山県」）, municipality=市区町村名（例「倉敷市」）。 */
+export const externalMuniHubKey = (
+  prefectureRegion: string,
+  municipalityName: string,
+  hubCatSlug: string,
+): string => `${prefectureRegion}|${municipalityName}|${hubCatSlug}`
+
+/**
+ * 市区町村×職種の件数マトリクス。generateStaticParams・sitemap・生成判定に使う。
+ * (prefecture, municipality_name, job_category) を射影して全件取得しアプリ側で集計。
+ */
+export const getExternalMuniHubCounts = unstable_cache(
+  async (): Promise<ExternalHubCounts> => {
+    const cats = Object.keys(EXTERNAL_CATEGORY_TO_HUB)
+    const inList = `(${cats.map((c) => `"${c}"`).join(",")})`
+    const page = (offset: number, wantCount = false) =>
+      rawQuery(
+        {
+          select: "prefecture,municipality_name,job_category",
+          job_category: `in.${inList}`,
+          municipality_name: "not.is.null",
+          order: "source_id.asc",
+          limit: String(COUNT_PAGE),
+          offset: String(offset),
+        },
+        wantCount,
+      )
+    const first = await page(0, true)
+    if (first.rows.length === 0) return {}
+    const pages = Math.min(Math.ceil(first.count / COUNT_PAGE), COUNT_MAX_PAGES)
+    const rest = await Promise.all(
+      Array.from({ length: pages - 1 }, (_, i) => page((i + 1) * COUNT_PAGE)),
+    )
+    const counts: ExternalHubCounts = {}
+    for (const row of [first, ...rest].flatMap((p) => p.rows)) {
+      const slug = EXTERNAL_CATEGORY_TO_HUB[String(row.job_category ?? "")]
+      const region = String(row.prefecture ?? "")
+      const muni = String(row.municipality_name ?? "")
+      if (!slug || !region || !muni) continue
+      const key = externalMuniHubKey(region, muni, slug)
+      counts[key] = (counts[key] ?? 0) + 1
+    }
+    return counts
+  },
+  ["external-muni-hub-counts"],
+  { revalidate: REVALIDATE },
+)
 
 /** 外部求人1件（詳細ページ用）。存在しなければ null。 */
 export const getExternalJob = async (
