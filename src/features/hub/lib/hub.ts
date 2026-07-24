@@ -25,6 +25,10 @@ export const hubUrl = {
   prefectureCategory: (prefSlug: string, catSlug: string) => `/jobs/${prefSlug}/${catSlug}`,
   category: (catSlug: string) => `/jobs/category/${catSlug}`,
   group: (groupSlug: string) => `/jobs/group/${groupSlug}`,
+  // 市区町村×職種（HACK1）。順序は 県→職種→市区町村（既存2セグメントとセグメント名を揃え衝突回避）。
+  // 市区町村名は日本語のままURLに置く（ドラEVER等と同方式・エンコードで解決）。
+  municipalityCategory: (prefSlug: string, muniName: string, catSlug: string) =>
+    `/jobs/${prefSlug}/${catSlug}/${encodeURIComponent(muniName)}`,
 }
 
 /**
@@ -121,7 +125,11 @@ export const hubLead = {
     `${catNameWithSynonym(catName, synonym)}の求人を全国で${count}件掲載しています。正社員の中途採用から未経験歓迎の募集まで、地域から絞り込んで条件に合う${catName}の求人を探せます。`,
 }
 
+export const hubMuniLead = (region: string, muni: string, catName: string, count: number) =>
+  `${region}${muni}の${catName}求人を${count}件掲載しています。未経験歓迎・資格取得支援・寮完備など、${muni}で働く${catName}の最新求人をまとめました。近隣エリアの求人もあわせて探せます。`
+
 export const hubTitle = {
+  municipalityCategory: (region: string, muni: string, catName: string) => `${muni}（${region}）の${catName}求人・転職`,
   prefectureCategory: (region: string, catName: string) => `${region}の${catName}求人・転職`,
   prefecture: (region: string) => `${region}のドライバー・整備士求人・転職`,
   category: (catName: string, synonym?: string) => `${catNameWithSynonym(catName, synonym)}の求人・転職（全国）`,

@@ -6,9 +6,11 @@ import { getMediaArticlesByKeyword } from "@/features/media/api"
 import {
   getExternalJobsForHub,
   getExternalHubCounts,
+  getExternalMuniHubCounts,
   hasExternalJobsForCategory,
   externalHubKey,
   qualifiesByExternalJobs,
+  HUB_MIN_MUNI_JOBS,
 } from "@/features/external-jobs/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
 import {
@@ -114,6 +116,25 @@ export default async function Page({ params }: Props) {
   const cc = catContent[cat.slug!]
   const content = await getHubContent(base)
 
+  // 市区町村×職種ハブへの内部リンク（HACK1）。外部求人が閾値以上の市区町村だけを載せ、
+  // 県ハブから到達可能にする（ハブが孤立せず、クロールも流れる）。件数降順・上限で絞る。
+  const muniLinks = hasExternalJobsForCategory(cat.slug)
+    ? Object.entries(await getExternalMuniHubCounts())
+        .filter(([key, n]) => {
+          const [region, , slug] = key.split("|")
+          return region === pref.region && slug === cat.slug && n >= HUB_MIN_MUNI_JOBS
+        })
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 40)
+        .map(([key, n]) => {
+          const muni = key.split("|")[1]
+          return {
+            label: `${muni}の${cat.name}（${n}件）`,
+            href: hubUrl.municipalityCategory(pref.slug!, muni, cat.slug!),
+          }
+        })
+    : []
+
   // ハローワーク転載求人（対応職種のみ・自社求人とは別枠で表示）
   const moreHref = searchUrl({ prefectureId: pref.id, jobCategoryId: cat.id })
   const external = hasExternalJobsForCategory(cat.slug)
@@ -169,6 +190,7 @@ export default async function Page({ params }: Props) {
       external={external}
       moreHref={moreHref}
       related={[
+        { title: `${pref.region}の市区町村から${cat.name}を探す`, links: muniLinks },
         { title: `${cat.name}の求人をすべての地域で見る`, links: [{ label: `${cat.name}の求人一覧（全国）`, href: hubUrl.category(cat.slug!) }] },
         { title: `${pref.region}の他の職種から探す`, links: sameKenOtherCat },
         { title: `他の地域の${cat.name}を探す`, links: sameCatOtherKen.slice(0, 24) },
