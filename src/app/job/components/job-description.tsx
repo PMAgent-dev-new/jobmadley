@@ -81,7 +81,7 @@ export default function JobDescription({ job }: JobDescriptionProps) {
       {job.workHours && (
         <div className="border-t pt-8">
           <h3 className="text-lg font-semibold text-gray-800 mb-4">勤務時間</h3>
-          <p className="text-gray-700">{job.workHours}</p>
+          <p className="text-gray-700 whitespace-pre-wrap break-words">{job.workHours}</p>
         </div>
       )}
 
@@ -105,7 +105,11 @@ export default function JobDescription({ job }: JobDescriptionProps) {
             {job.access && (
               <div>
                 <h4 className="font-medium mt-4 mb-2">アクセス</h4>
-                <p>{job.access}</p>
+                <div className="space-y-1">
+                  {formatAccessLines(job.access).map((line, index) => (
+                    <p key={index}>・{line}</p>
+                  ))}
+                </div>
               </div>
             )}
           </div>
