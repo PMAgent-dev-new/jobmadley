@@ -11,9 +11,11 @@ import JobBreadcrumb from "../components/job-breadcrumb"
 import JobTitleActions from "../components/job-title-actions"
 import JobDescription from "../components/job-description"
 import JobFaqSection from "../components/job-faq"
+import JobStoreLocation from "../components/job-store-location"
 import RelatedJobs from "../components/related-jobs"
 import { getMediaArticles } from "@/features/media/api"
 import { buildJobFaqs } from "@/features/jobs/lib/job-faq"
+import { buildStoreLocation } from "@/features/jobs/lib/store-location"
 import { generateBreadcrumbStructuredData, generateFaqStructuredData, generateJobMetadata, generateJobPostingStructuredData } from "@/shared/lib/metadata"
 import JobViewTracker from "../components/job-view-tracker"
 import { isMetaCatalogJob } from "@/shared/lib/catalog-eligibility"
@@ -89,6 +91,8 @@ export default async function JobPage({ params }: JobPageProps) {
   // FAQは求人の実データだけから生成する。本文表示（JobFaqSection）と FAQPage で同じ配列を
   // 使い回すことで、文言の不一致（Googleのガイドライン違反）が起きない構造にしている。
   const jobFaqs = buildJobFaqs(job)
+  // 多店舗企業の本文重複対策: 店舗ごとに必ず異なる実データ（住所・アクセス）で独自性を出す
+  const storeLocation = buildStoreLocation(job)
   const faqStructuredData = jobFaqs.length > 0 ? generateFaqStructuredData(jobFaqs) : null
   const breadcrumbItems: Array<{ name: string; url?: string }> = [{ name: "トップページ", url: "/" }]
 
@@ -155,6 +159,8 @@ export default async function JobPage({ params }: JobPageProps) {
             <JobTitleActions job={job} />
 
             <JobDescription job={job} />
+
+            <JobStoreLocation info={storeLocation} />
 
             <JobFaqSection faqs={jobFaqs} />
 

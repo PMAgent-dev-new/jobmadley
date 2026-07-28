@@ -327,7 +327,7 @@ const wageUnitLabel = (values?: string[]): string => {
 }
 
 /** prefecture/municipality 参照が無い場合に addressPrefMuni から都道府県・市区町村を抽出 */
-const parseAddressPrefMuni = (
+export const parseAddressPrefMuni = (
   s?: string,
 ): { region?: string; locality?: string } => {
   if (!s) return {}
