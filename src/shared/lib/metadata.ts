@@ -398,20 +398,19 @@ export const generateJobPostingStructuredData = (job: JobDetail) => {
     console.warn(`[JobPosting] addressRegion unresolved: job=${job.id}`)
   }
 
-  // 掲載期限: CMSに掲載終了日(expiresAt)があれば正式値を使用。無ければ更新日(なければ公開日)+30日の暫定。
-  // 期限切れ求人に markup を残すことは Google の品質ガイドライン違反（手動対応リスク）のため必須。
+  // 掲載期限: CMSに掲載終了日(expiresAt)があれば正式値を使用。
+  // 無ければ「描画時点+30日」のローリング期限。掲載中の求人は応募受付中であり、
+  // ISR(revalidate=3600)で毎時再計算されるため、掲載継続中はクロール時点で常に将来日付になる。
+  // ※旧実装の「更新日+30日」は、更新が止まった掲載中求人を期限切れ扱いにしてしまい、
+  //   Googleしごと検索から除外される実害があった（GSC求人情報の有効アイテムが15件まで縮小）。
+  //   掲載終了した求人はページ自体が404になるため、期限切れmarkupの残置は起きない。
   let validThrough: string | undefined
   if (job.expiresAt) {
     validThrough = new Date(job.expiresAt).toISOString()
   } else {
-    const validThroughBase =
-      job.revisedAt ?? job.updatedAt ?? job.publishedAt ?? job.createdAt
-    validThrough = validThroughBase
-      ? new Date(
-          new Date(validThroughBase).getTime() +
-            VALID_THROUGH_FALLBACK_DAYS * 24 * 60 * 60 * 1000,
-        ).toISOString()
-      : undefined
+    validThrough = new Date(
+      Date.now() + VALID_THROUGH_FALLBACK_DAYS * 24 * 60 * 60 * 1000,
+    ).toISOString()
   }
 
   const streetAddress =
