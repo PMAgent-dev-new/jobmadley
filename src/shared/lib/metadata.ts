@@ -473,12 +473,36 @@ export const generateJobPostingStructuredData = (job: JobDetail) => {
  */
 export const generateOrganizationStructuredData = () => ({
   '@context': 'https://schema.org',
-  '@type': 'Organization',
+  // 汎用 Organization ではなく EmploymentAgency（人材紹介事業者）として宣言する。
+  // AI検索（ChatGPT検索・Copilot・AI Overviews）は「◯◯ おすすめ」系の質問に答えるとき、
+  // 実在する事業者かどうか・何の事業者かをエンティティ情報から判断する。業種を具体化し、
+  // 公的な許可番号を添えることで「実在の人材紹介会社」として認識されやすくする。
+  '@type': 'EmploymentAgency',
   name: SITE_NAME,
-  alternateName: 'RIDE JOB',
+  alternateName: ['RIDE JOB', 'ライドジョブ'],
   url: SITE_URL,
   logo: `${SITE_URL}${LOGO_IMAGE}`,
+  image: `${SITE_URL}${LOGO_IMAGE}`,
   description: SITE_DESCRIPTION,
+  // 厚生労働大臣の有料職業紹介事業許可。求人フィードでも同一の番号を明示しており、
+  // 第三者が検証可能な実体シグナルになる。
+  hasCredential: {
+    '@type': 'EducationalOccupationalCredential',
+    credentialCategory: '有料職業紹介事業許可',
+    recognizedBy: { '@type': 'GovernmentOrganization', name: '厚生労働省' },
+    identifier: '13-ユ-313375',
+  },
+  // 取り扱い職種。AIが「タクシー/整備士の転職サービス」と結び付けられるようにする。
+  knowsAbout: [
+    'タクシードライバーの求人・転職',
+    '自動車整備士の求人・転職',
+    'バス運転手の求人・転職',
+    'トラックドライバーの求人・転職',
+    '配送・宅配ドライバーの求人・転職',
+    '送迎ドライバーの求人・転職',
+    '二種免許・大型免許の取得支援',
+  ],
+  areaServed: { '@type': 'Country', name: '日本' },
   parentOrganization: {
     '@type': 'Organization',
     name: OPERATOR_NAME,
