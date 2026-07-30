@@ -20,6 +20,7 @@ import {
   resolveApplyContext,
 } from "@/features/application/lib/submitApplication"
 import { genEventId, trackMeta } from "@/shared/lib/meta-pixel"
+import { trackGa4 } from "@/shared/lib/ga4"
 import { ApplicantFields } from "@/features/application/components/applicant-fields"
 import { BirthDateSelect } from "@/features/application/components/birth-date-select"
 import { ConsentSection } from "@/features/application/components/consent-section"
@@ -47,7 +48,7 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
 
   useApplySourceCapture()
 
-  // 応募フォーム表示時に Meta AddToCart（応募開始）を発火
+  // 応募フォーム表示時に Meta AddToCart / GA4 add_to_cart（応募開始）を発火
   useEffect(() => {
     if (job?.id) {
       trackMeta("AddToCart", {
@@ -55,6 +56,10 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
         contentName: job.jobName ?? undefined,
         value: 0,
         currency: "JPY",
+      })
+      trackGa4("add_to_cart", {
+        items: [{ item_id: job.id, item_name: job.jobName ?? undefined }],
+        value: 0,
       })
     }
   }, [catalogEligible, job?.id, job?.jobName])
@@ -122,6 +127,12 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
         },
         metaEventId,
       )
+      // GA4 側も同じタイミングで generate_lead を送る。GA4 のキーイベントに登録すると
+      // チャネル別のCVとして集計できる（Meta だけが応募を観測している状態の解消）。
+      trackGa4("generate_lead", {
+        items: job?.id ? [{ item_id: job.id, item_name: job.jobName ?? undefined }] : undefined,
+        value: 0,
+      })
 
       if (applicationSource === "standby" && !hasPushedStandbyCv.current) {
         pushStandbyCv({
