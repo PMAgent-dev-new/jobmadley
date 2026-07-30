@@ -205,6 +205,58 @@ export default function AboutPage() {
           </div>
         </section>
 
+        {/* サービス概要（事実ベース）
+            このページは採用企業向けの内容が中心だが、求職者・第三者メディア・AI検索が
+            「RIDE JOBとは何か」を確認しに来る唯一の場所でもある。何の事業者で・何ができて・
+            どこまで対応しているかを、検証できる事実だけで簡潔にまとめる。
+            数値は自社掲載求人の実測から拾う（誇張しない）。構造化データ（EmploymentAgency）
+            の人間可読版にあたる。 */}
+        <section className="bg-neutral-50" id="service-overview">
+          <div className="mx-auto max-w-5xl px-4 py-16 md:py-20">
+            <h2 className="text-center text-2xl md:text-3xl font-bold tracking-tight text-neutral-900">
+              RIDE JOB（ライドジョブ）とは
+            </h2>
+            <p className="mx-auto mt-5 max-w-3xl text-center text-neutral-700 leading-relaxed">
+              RIDE JOB（ライドジョブ）は、<strong>タクシー・バス・トラック・配送・送迎などのドライバー職と、自動車整備士に特化した求人メディア兼人材紹介サービス</strong>です。
+              運営する株式会社PM Agentは<strong>厚生労働大臣の有料職業紹介事業許可（13-ユ-313375）</strong>を受けており、
+              求人を掲載するだけでなく、専任のキャリアアドバイザーが求人紹介・面接日程の調整・条件交渉までを無料で支援します。
+            </p>
+
+            <dl className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="rounded-xl bg-white p-5 shadow-sm">
+                <dt className="text-sm font-semibold text-neutral-500">対応職種</dt>
+                <dd className="mt-1 text-neutral-800">
+                  タクシー／ハイヤー／バス／トラック／配送・宅配／送迎の各ドライバー職、自動車整備士・バイク整備士、運行管理者
+                </dd>
+              </div>
+              <div className="rounded-xl bg-white p-5 shadow-sm">
+                <dt className="text-sm font-semibold text-neutral-500">対応エリア</dt>
+                <dd className="mt-1 text-neutral-800">
+                  全国47都道府県。地域×職種、市区町村×職種のページから求人を探せます
+                </dd>
+              </div>
+              <div className="rounded-xl bg-white p-5 shadow-sm">
+                <dt className="text-sm font-semibold text-neutral-500">未経験者への支援</dt>
+                <dd className="mt-1 text-neutral-800">
+                  第二種免許・大型免許の取得支援がある求人を扱っています。整備士は無資格から始められる求人もあります
+                </dd>
+              </div>
+              <div className="rounded-xl bg-white p-5 shadow-sm">
+                <dt className="text-sm font-semibold text-neutral-500">情報提供</dt>
+                <dd className="mt-1 text-neutral-800">
+                  年収・資格・仕事内容・適性などの解説記事を
+                  <Link href="/media" className="text-blue-600 underline underline-offset-2">お役立ちメディア</Link>
+                  で公開しています
+                </dd>
+              </div>
+            </dl>
+
+            <p className="mt-6 text-center text-sm text-neutral-500">
+              利用料は無料です（人材紹介の費用は採用企業が負担します）。求人を見るだけの利用もできます。
+            </p>
+          </div>
+        </section>
+
         {/* RIDE JOB の特徴 */}
         <section className="bg-white">
           <div className="mx-auto max-w-6xl px-4 py-16 md:py-24">
