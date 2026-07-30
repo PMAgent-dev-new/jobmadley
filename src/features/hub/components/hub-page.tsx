@@ -229,6 +229,12 @@ export default function HubPage({
                 <JobCard key={job.id} job={job} />
               ))}
             </div>
+          ) : (external?.count ?? 0) > 0 ? (
+            /* 自社求人が0件でも掲載求人自体は下のセクションにある。ここで「求人はありません」と
+               出すと、見出しの「◯件」および下の一覧と矛盾する（倉敷市ハブで発生）。 */
+            <p className="mt-6 text-gray-500">
+              この条件の求人は、下の「{summaryLabel}の求人をもっと見る」にまとめています。
+            </p>
           ) : (
             <p className="mt-6 text-gray-500">現在この条件に一致する求人はありません。</p>
           )}
