@@ -270,8 +270,23 @@ export const qualifiesByExternalJobs = (
 ): boolean => (counts[externalHubKey(prefectureRegion, hubCatSlug)] ?? 0) >= HUB_MIN_EXTERNAL_JOBS
 
 // --- 市区町村×職種ハブ（HACK1: 整備士バーティカル。競合の粒度に対抗）-----------------
-/** 市区町村ハブの最小件数。薄いページ量産を避けるため県ハブと同じ20を採用。 */
+/** 市区町村ハブの「新規生成」最小件数。薄いページ量産を避けるため県ハブと同じ20を採用。 */
 export const HUB_MIN_MUNI_JOBS = 20
+
+/**
+ * 公開済み（固有本文あり）市区町村ハブの「維持」最小件数＝ヒステリシスの下限。
+ *
+ * 生成と同じ閾値で 404/noindex にすると、ハローワーク求人が「受理月の翌々月末」で
+ * 一斉失効する月次のノコギリ波のたびに、インデックス済みハブが消えて評価を失う。
+ * 実測(2026-08): 生成条件(>=20)を満たす168件のうち70件(42%)が20〜24件の危険域で、
+ * 月次変動(実測 -18%)で大半が閾値を割る状態だった。
+ *
+ * そこで「作るのは20件以上・一度公開したら5件以上ある限り維持」の二段構えにする。
+ * ★適用対象は固有本文を持つ curated な市区町村ハブ（getMunicipalityContentEntries）に限定する。
+ * 全組み合わせに適用すると、5〜19件帯の1,443組が新たに200/indexになり
+ * scaled content abuse のフットプリントになるため。
+ */
+export const HUB_KEEP_MUNI_JOBS = 5
 
 /** 市区町村ハブのキー。prefecture=region（例「岡山県」）, municipality=市区町村名（例「倉敷市」）。 */
 export const externalMuniHubKey = (

@@ -6,6 +6,7 @@ import { getMunicipalities } from "@/features/master/municipalities"
 import {
   getExternalJobsForMuniHub,
   hasExternalJobsForCategory,
+  HUB_KEEP_MUNI_JOBS,
   HUB_MIN_MUNI_JOBS,
 } from "@/features/external-jobs/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
@@ -24,8 +25,14 @@ import {
 
 /**
  * 市区町村×職種ハブ（HACK1: 整備士バーティカル。ドラEVER/セイビーの粒度に対抗）。
- * URL: /jobs/[prefecture=romaji]/[municipality=日本語]/[jobCategory=romaji]
- * オンデマンドISR。薄いページ量産を避けるため、自社＋外部の合算が閾値未満なら notFound（生成しない）。
+ * URL: /jobs/[prefecture=romaji]/[jobCategory=romaji]/[municipality=日本語]
+ * オンデマンドISR。
+ *
+ * 生成と維持で閾値を分ける（ヒステリシス）:
+ * - 固有本文の無い組み合わせ … 従来どおり HUB_MIN_MUNI_JOBS 未満は notFound（薄いページの量産を防ぐ）
+ * - 固有本文がある公開済みハブ … HUB_KEEP_MUNI_JOBS 以上ある限り 200 + index を維持する
+ *   （ハローワーク求人は受理月の翌々月末で一斉失効するため、同じ閾値だと月次の在庫変動で
+ *     インデックス済みURLが 404/noindex に落ちて評価を失う）
  */
 export const revalidate = 3600
 export const dynamicParams = true
@@ -72,8 +79,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       ? getExternalJobsForMuniHub({ prefectureRegion: pref.region, municipalityName: muni.name, hubCatSlug: cat.slug!, limit: 1 })
       : Promise.resolve({ count: 0, jobs: [] }),
   ])
+  // 固有本文があるハブ（＝公開済みで sitemap にも載せた対象）は維持閾値まで index を保つ。
+  // ここを Page 側の判定と揃えないと「200 なのに noindex」という最悪の状態になる。
   const total = selfCount + ext.count
-  if (total < HUB_MIN_MUNI_JOBS) {
+  const minToServe = content ? HUB_KEEP_MUNI_JOBS : HUB_MIN_MUNI_JOBS
+  if (total < minToServe) {
     return { title: "求人が見つかりません", robots: { index: false, follow: false } }
   }
   return generateHubMetadata({
@@ -107,12 +117,15 @@ export default async function Page({ params }: Props) {
       })
     : { jobs: [], count: 0 }
 
-  // 薄いページ量産を避ける: 合算が閾値未満なら生成しない（sitemap/内部リンクとも整合）。
-  if (totalCount + external.count < HUB_MIN_MUNI_JOBS) notFound()
-
   const label = `${muni.name}の${cat.name}`
   const contentKey = `/jobs/${pref.slug}/${cat.slug}/${muni.name}`
   const content = await getHubContent(contentKey)
+
+  // 固有本文の無い組み合わせは従来どおり生成閾値で足切り（薄いページの量産を防ぐ）。
+  // 固有本文がある公開済みハブは、維持閾値を割るまで 404 にしない（generateMetadata と同一条件）。
+  const minToServe = content ? HUB_KEEP_MUNI_JOBS : HUB_MIN_MUNI_JOBS
+  if (totalCount + external.count < minToServe) notFound()
+
   const stats = { ...computeHubStats(jobs), count: totalCount }
   const cc = catContent[cat.slug!]
 

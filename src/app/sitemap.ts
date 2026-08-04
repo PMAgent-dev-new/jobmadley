@@ -18,7 +18,7 @@ import {
   getExternalMuniHubCounts,
   qualifiesByExternalJobs,
   externalMuniHubKey,
-  HUB_MIN_MUNI_JOBS,
+  HUB_KEEP_MUNI_JOBS,
 } from "@/features/external-jobs/api"
 
 /**
@@ -49,13 +49,14 @@ const getHubRoutes = async (): Promise<MetadataRoute.Sitemap> => {
   }
   // 市区町村×職種ハブ（HACK1）: 固有本文を用意したものだけ掲載する段階投入。
   // テンプレのみの薄い市区町村ハブを一括で sitemap に押し込むと scaled content abuse に
-  // 直撃するため、本文を書いた市区町村から順に載せる。在庫がしきい値を割った場合
-  // （ページ側は notFound を返す）に sitemap とページが食い違わないよう件数も確認する。
+  // 直撃するため、本文を書いた市区町村から順に載せる。
+  // 件数の判定はページ側の「維持」閾値と揃える（HUB_KEEP_MUNI_JOBS）。生成閾値のままだと
+  // 月次の在庫変動でページは 200 のまま sitemap からだけ消え、内部リンクからも外れて孤児化する。
   const muniCounts = await getExternalMuniHubCounts()
   for (const e of getMunicipalityContentEntries()) {
     const pref = prefectures.find((p) => p.slug === e.prefSlug)
     if (!pref) continue
-    if ((muniCounts[externalMuniHubKey(pref.region, e.muniName, e.catSlug)] ?? 0) < HUB_MIN_MUNI_JOBS) continue
+    if ((muniCounts[externalMuniHubKey(pref.region, e.muniName, e.catSlug)] ?? 0) < HUB_KEEP_MUNI_JOBS) continue
     routes.push({
       url: `${SITE_URL}${hubUrl.municipalityCategory(e.prefSlug, e.muniName, e.catSlug)}`,
       changeFrequency: "daily",
