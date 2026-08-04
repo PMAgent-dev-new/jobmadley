@@ -68,6 +68,48 @@ const writeCookie = (name: string, value: string, maxAgeSec: number): void => {
 const isMeaningful = (t: Partial<AttributionTouch>): boolean =>
   Boolean(t.source || t.medium || t.campaign || t.content || t.term)
 
+/** 参照元ホスト名 → 検索エンジンの source 名。該当なしは undefined。 */
+const SEARCH_ENGINE_HOSTS: ReadonlyArray<[RegExp, string]> = [
+  [/(^|\.)google\./, "google"],
+  [/(^|\.)(search\.)?yahoo\./, "yahoo"],
+  [/(^|\.)bing\./, "bing"],
+  [/(^|\.)duckduckgo\./, "duckduckgo"],
+  [/(^|\.)ecosia\./, "ecosia"],
+  [/(^|\.)baidu\./, "baidu"],
+  [/(^|\.)naver\./, "naver"],
+]
+
+/**
+ * UTM が無い着地で、document.referrer から touch を推定する。
+ * 自然検索は UTM を持たないため、これが無いと organic が全て direct に落ちてしまう
+ * （＝自然検索経由の応募が計測できない）。
+ * - 検索エンジン → { source: "google" 等, medium: "organic" }
+ * - 自サイト内遷移 / referrer 無し → undefined（direct のまま。既存挙動を変えない）
+ * - その他の外部サイト → { source: ホスト名, medium: "referral" }
+ */
+export const touchFromReferrer = (
+  referrer: string,
+  currentHost: string,
+): Partial<AttributionTouch> | undefined => {
+  if (!referrer) return undefined
+  let host: string
+  try {
+    host = new URL(referrer).hostname.toLowerCase()
+  } catch {
+    return undefined
+  }
+  if (!host) return undefined
+
+  // 自ドメイン（サブドメイン含む）からの遷移は流入ではない
+  const self = currentHost.toLowerCase().replace(/^www\./, "")
+  if (self && (host === self || host.endsWith(`.${self}`))) return undefined
+
+  for (const [pattern, name] of SEARCH_ENGINE_HOSTS) {
+    if (pattern.test(host)) return { source: name, medium: "organic" }
+  }
+  return { source: host.replace(/^www\./, ""), medium: "referral" }
+}
+
 /** URL から touch 相当のパラメータを抜き出す（値が無ければ undefined）。 */
 const readTouchParams = (params: URLSearchParams): Partial<AttributionTouch> => {
   const pick = (key: string) => params.get(key)?.trim() || undefined
@@ -114,6 +156,7 @@ export function captureAttribution(
   path: string,
   referrer: string,
   nowIso: string,
+  currentHost?: string,
 ): Attribution {
   const params = new URLSearchParams(search)
   const touchParams = readTouchParams(params)
@@ -122,9 +165,33 @@ export function captureAttribution(
 
   const current = readAttribution()
 
-  // UTM もクリックIDも無ければ既存値を維持（誤って上書き/消去しない）
+  // UTM もクリックIDも無い着地。自然検索/参照元はここに該当するため、
+  // referrer から touch を推定して「既存の touch が無いときだけ」記録する。
+  //
+  // なぜ「無いときだけ」か: 既存の lastTouch（広告など）を後続の自然検索で上書きすると
+  // 広告の成果計測（CPA）が変わってしまうため。ここでは direct に落ちていた分だけを
+  // organic/referral として救い、有料の帰属には一切影響を与えない。
   if (!isMeaningful(touchParams) && !fbclid && !gclid) {
-    return current
+    if (current.lastTouch || current.firstTouch) return current
+
+    const host =
+      currentHost ?? (typeof window !== "undefined" ? window.location.host : "")
+    const derived = touchFromReferrer(referrer, host)
+    if (!derived) return current
+
+    const referrerTouch: AttributionTouch = { ...derived, at: nowIso }
+    const nextFromReferrer: Attribution = {
+      ...current,
+      firstTouch: referrerTouch,
+      lastTouch: referrerTouch,
+      landing: current.landing ?? path,
+      referrer: current.referrer ?? (referrer || undefined),
+    }
+    writeCookie(COOKIE_NAME, JSON.stringify(nextFromReferrer), MAX_AGE_SEC)
+    // 後方互換 Cookie も揃える（GTM 等が参照）
+    if (referrerTouch.source) writeCookie("utm_source", referrerTouch.source, LEGACY_MAX_AGE_SEC)
+    if (referrerTouch.medium) writeCookie("utm_medium", referrerTouch.medium, LEGACY_MAX_AGE_SEC)
+    return nextFromReferrer
   }
 
   const touch: AttributionTouch = { ...touchParams, at: nowIso }
