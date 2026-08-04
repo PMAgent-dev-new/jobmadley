@@ -10,6 +10,7 @@ import {
   hasExternalJobsForCategory,
   externalHubKey,
   qualifiesByExternalJobs,
+  HUB_KEEP_MUNI_JOBS,
   HUB_MIN_MUNI_JOBS,
 } from "@/features/external-jobs/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
@@ -28,6 +29,7 @@ import {
   buildHubFaqs,
   catContent,
   getHubContent,
+  getMunicipalityContentEntries,
   hubArticleKeyword,
 } from "@/features/hub/lib/hub"
 
@@ -118,11 +120,18 @@ export default async function Page({ params }: Props) {
 
   // 市区町村×職種ハブへの内部リンク（HACK1）。外部求人が閾値以上の市区町村だけを載せ、
   // 県ハブから到達可能にする（ハブが孤立せず、クロールも流れる）。件数降順・上限で絞る。
+  // 固有本文のある公開済みハブは、月次の在庫変動で生成閾値を割っても維持閾値までリンクを残す
+  // （ページは 200 を維持するのに、県ハブのリンクと sitemap から同時に消えると孤児化するため）。
+  const curatedMuniKeys = new Set(
+    getMunicipalityContentEntries().map((e) => `${e.prefSlug}|${e.muniName}|${e.catSlug}`),
+  )
   const muniLinks = hasExternalJobsForCategory(cat.slug)
     ? Object.entries(await getExternalMuniHubCounts())
         .filter(([key, n]) => {
-          const [region, , slug] = key.split("|")
-          return region === pref.region && slug === cat.slug && n >= HUB_MIN_MUNI_JOBS
+          const [region, muniName, slug] = key.split("|")
+          if (region !== pref.region || slug !== cat.slug) return false
+          const isCurated = curatedMuniKeys.has(`${pref.slug}|${muniName}|${slug}`)
+          return n >= (isCurated ? HUB_KEEP_MUNI_JOBS : HUB_MIN_MUNI_JOBS)
         })
         .sort((a, b) => b[1] - a[1])
         .slice(0, 40)
