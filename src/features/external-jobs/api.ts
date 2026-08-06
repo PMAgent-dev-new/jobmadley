@@ -134,11 +134,31 @@ async function query(
   return { rows: rows.map(mapRow), count }
 }
 
+/**
+ * 並び順は必ず一意に定まるようにする（source_id をタイブレーカーに置く）。
+ * last_seen / received_date は取り込みバッチ単位で同値になる行が非常に多く、
+ * これだけで order すると PostgREST の offset ページングでページ間の取りこぼしと
+ * 重複が発生する（東京都×トラックの「もっと見る」で 248 件中 247 件しか辿れなかった）。
+ */
+const ORDER_HUB = "last_seen.desc,source_id.asc"
+const ORDER_MUNI = "received_date.desc.nullslast,source_id.asc"
+
+/**
+ * 外部求人セクションの1画面あたりの表示件数。「もっと見る」もこの単位で追加する。
+ * ハブは4列グリッドなので4の倍数にしておく。
+ */
+export const EXTERNAL_PAGE_SIZE = 24
+
+/** offset を PostgREST パラメータへ。0/未指定のときは付けない（既存クエリのキャッシュキーを変えないため）。 */
+const offsetParam = (offset?: number): Record<string, string> =>
+  offset && offset > 0 ? { offset: String(offset) } : {}
+
 /** ハブ（県×職種）向けの外部求人と総件数。県は prefectures.region（例「東京都」）＝外部 prefecture と一致。 */
 export const getExternalJobsForHub = async (params: {
   prefectureRegion: string
   hubCatSlug: string
   limit?: number
+  offset?: number
 }): Promise<{ jobs: ExternalJob[]; count: number }> => {
   const cats = HUB_SLUG_TO_EXTERNAL_CATEGORIES[params.hubCatSlug]
   if (!cats || !params.prefectureRegion) return { jobs: [], count: 0 }
@@ -148,8 +168,9 @@ export const getExternalJobsForHub = async (params: {
       select: SELECT_COLUMNS,
       prefecture: `eq.${params.prefectureRegion}`,
       job_category: `in.${inList}`,
-      order: "last_seen.desc",
-      limit: String(params.limit ?? 24),
+      order: ORDER_HUB,
+      limit: String(params.limit ?? EXTERNAL_PAGE_SIZE),
+      ...offsetParam(params.offset),
     },
     true,
   )
@@ -162,6 +183,7 @@ export const getExternalJobsForMuniHub = async (params: {
   municipalityName: string
   hubCatSlug: string
   limit?: number
+  offset?: number
 }): Promise<{ jobs: ExternalJob[]; count: number }> => {
   const cats = HUB_SLUG_TO_EXTERNAL_CATEGORIES[params.hubCatSlug]
   if (!cats || !params.prefectureRegion || !params.municipalityName) return { jobs: [], count: 0 }
@@ -172,8 +194,9 @@ export const getExternalJobsForMuniHub = async (params: {
       prefecture: `eq.${params.prefectureRegion}`,
       municipality_name: `eq.${params.municipalityName}`,
       job_category: `in.${inList}`,
-      order: "received_date.desc.nullslast",
-      limit: String(params.limit ?? 24),
+      order: ORDER_MUNI,
+      limit: String(params.limit ?? EXTERNAL_PAGE_SIZE),
+      ...offsetParam(params.offset),
     },
     true,
   )
@@ -184,6 +207,7 @@ export const getExternalJobsForMuniHub = async (params: {
 export const getExternalJobsForCategory = async (params: {
   hubCatSlug: string
   limit?: number
+  offset?: number
 }): Promise<{ jobs: ExternalJob[]; count: number }> => {
   const cats = HUB_SLUG_TO_EXTERNAL_CATEGORIES[params.hubCatSlug]
   if (!cats) return { jobs: [], count: 0 }
@@ -192,8 +216,9 @@ export const getExternalJobsForCategory = async (params: {
     {
       select: SELECT_COLUMNS,
       job_category: `in.${inList}`,
-      order: "last_seen.desc",
-      limit: String(params.limit ?? 24),
+      order: ORDER_HUB,
+      limit: String(params.limit ?? EXTERNAL_PAGE_SIZE),
+      ...offsetParam(params.offset),
     },
     true,
   )

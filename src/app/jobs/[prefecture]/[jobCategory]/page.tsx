@@ -12,6 +12,7 @@ import {
   qualifiesByExternalJobs,
   HUB_KEEP_MUNI_JOBS,
   HUB_MIN_MUNI_JOBS,
+  EXTERNAL_PAGE_SIZE,
 } from "@/features/external-jobs/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
 import {
@@ -151,9 +152,16 @@ export default async function Page({ params }: Props) {
         const { jobs, count } = await getExternalJobsForHub({
           prefectureRegion: pref.region,
           hubCatSlug: cat.slug!,
-          limit: 24,
+          limit: EXTERNAL_PAGE_SIZE,
         })
-        return { jobs, count, region: pref.region, catName: cat.name, selfJobsHref: moreHref }
+        return {
+          jobs,
+          count,
+          region: pref.region,
+          catName: cat.name,
+          selfJobsHref: moreHref,
+          query: { cat: cat.slug!, pref: pref.region },
+        }
       })()
     : undefined
 

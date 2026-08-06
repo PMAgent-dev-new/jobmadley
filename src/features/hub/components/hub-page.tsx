@@ -65,6 +65,8 @@ interface HubPageProps {
     region: string
     catName: string
     selfJobsHref: string
+    /** 「もっと見る」の追加読み込み用（/api/external-jobs へ渡す絞り込み条件） */
+    query: { cat: string; pref?: string; muni?: string }
   }
 }
 
@@ -238,7 +240,11 @@ export default function HubPage({
           ) : (
             <p className="mt-6 text-gray-500">現在この条件に一致する求人はありません。</p>
           )}
-          {moreHref && (
+          {/* moreHref の先は自社求人だけの /search。自社が0件のときに出すと、
+              このページが「◯件」と名乗った直後に0件へ落とすことになる（東京都×トラックで
+              248件→0件が発生していた）。自社求人が実在するときだけ導線を出す。
+              自社0件のハブでは、下の外部求人セクションの「もっと見る」が全件への導線になる。 */}
+          {moreHref && totalCount > 0 && (
             <div className="mt-8 text-center">
               <Link
                 href={moreHref}
@@ -281,6 +287,8 @@ export default function HubPage({
             region={external.region}
             catName={external.catName}
             selfJobsHref={external.selfJobsHref}
+            selfJobsCount={totalCount}
+            query={external.query}
           />
         )}
 
