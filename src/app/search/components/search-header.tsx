@@ -52,9 +52,13 @@ export default function SearchHeader({
           <span className="text-lg text-gray-600">
             該当件数 <span className="font-bold text-red-500">{totalCount}件</span>
           </span>
-          <Link href="#" className="text-sm text-blue-600 hover:underline">
-            登録情報を変更する
-          </Link>
+          {/* 旧実装は href="#" のダミーリンクで、押しても何も起きなかった。
+              文言も「登録情報」だったが、このサイトに会員登録の概念は無い（応募は都度フォーム）ため
+              存在しない機能を約束していた。実際にこのページで変えられるのは検索条件なので、
+              同一ページの絞り込み（FilterSidebar）へアンカーする。 */}
+          <a href="#search-filter" className="text-sm text-blue-600 hover:underline">
+            検索条件を変更する
+          </a>
         </div>
       </div>
     </>

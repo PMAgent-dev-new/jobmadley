@@ -14,7 +14,6 @@ import SearchHeader from "./components/search-header"
 import SearchConditionSummary from "./components/search-condition-summary"
 import JobList from "./components/job-list"
 import SearchPagination from "./components/search-pagination"
-import SortTabs from "./components/sort-tabs"
 import FilterSidebar from "./components/filter-sidebar"
 import { generateSearchMetadata } from "@/shared/lib/metadata"
 import { normalizeSearchParams } from "@/shared/lib/search-params"
@@ -108,7 +107,10 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
 
   const { companyArticles, interviewArticles } = mediaArticles
 
-  const prefectureName = prefectureData?.region ?? "都道府県未選択"
+  // 未選択時は内部状態をそのまま見せず「全国」と名乗る。
+  // 旧実装の "都道府県未選択" は H1・パンくず・検索条件サマリーに露出し、
+  // 同じページの metadata 側（generateSearchMetadata）が "全国" を使うのと不整合だった。
+  const prefectureName = prefectureData?.region ?? "全国"
   const totalPages = Math.ceil(totalCount / 10)
   const currentPage = Math.min(Math.max(page, 1), totalPages || 1)
 
@@ -175,9 +177,12 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
               jobCategoryId={jobCategoryId}
             />
 
-            <div className="mb-4">
-              <SortTabs />
-            </div>
+            {/* SortTabs は一旦非表示。`?sort=` を書き換えるだけで getJobsPaged の orders は
+                常に "-publishedAt" 固定だったため、「おすすめ順」「新着順」どちらを押しても
+                結果が変わらない状態だった（上の「登録情報を変更する」と同じ“動かないUI”）。
+                「おすすめ順」の定義がコード・CMSのどちらにも無いため、順序を憶測で決めずに
+                表示のみ止める。並び順は従来どおり公開日の新しい順で不変。
+                おすすめの定義が決まったら、ここを戻し orders を sort から引くこと。 */}
 
             <JobList jobs={jobs} />
 

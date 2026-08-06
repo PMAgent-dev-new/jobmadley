@@ -24,7 +24,8 @@ export default function FilterSidebar(props: FilterSidebarProps) {
   }
 
   return (
-    <aside className="bg-white border rounded-md p-4 md:sticky md:top-6 h-fit">
+    // id は検索ヘッダーの「検索条件を変更する」からのアンカー先（scroll-mt はヘッダー分の余白）
+    <aside id="search-filter" className="scroll-mt-24 bg-white border rounded-md p-4 md:sticky md:top-6 h-fit">
       <h2 className="text-base font-semibold text-gray-800 mb-3">検索</h2>
       <SearchOptions {...props} />
       <button
