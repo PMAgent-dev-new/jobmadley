@@ -5,6 +5,8 @@ import SiteHeader from "@/shared/components/site-header"
 import SiteFooter from "@/shared/components/site-footer"
 import {
   getExternalJob,
+  getExternalJobDetail,
+  EXTERNAL_DETAIL_GROUPS,
   hubSlugForExternalCategory,
   externalApplyId,
 } from "@/features/external-jobs/api"
@@ -55,6 +57,7 @@ export default async function Page({ params }: Props) {
   const job = await getExternalJob(source, decodeURIComponent(id))
   if (!job) notFound()
 
+  const detail = await getExternalJobDetail(job.source, job.sourceId)
   const hubSlug = hubSlugForExternalCategory(job.jobCategory)
   const applyHref = `/apply/${externalApplyId(job.source, job.sourceId)}`
   // パンくずのラベルはリンク先ハブの職種名を使う。外部側のカテゴリ名（例「配送・宅配ドライバー」）を
@@ -102,13 +105,34 @@ export default async function Page({ params }: Props) {
         {/* 掲載企業は伏せる。空欄にすると情報の欠落に見えるため、伏せていることを明示する。 */}
         <p className="mt-1 text-gray-600">掲載企業：非公開</p>
 
+        {/* 概要。勤務地は本体レコード由来＝市区町村まで（詳細ページの住所は番地まで載っており、
+            検索すると掲載企業が特定できてしまうため取り込んでいない）。 */}
         <dl className="mt-6">
           <Row label="勤務地" value={job.address || job.prefecture} />
           <Row label="給与" value={salary} />
           <Row label="雇用形態" value={job.employmentType} />
           <Row label="就業時間" value={job.workHours} />
-          <Row label="仕事内容" value={job.description} />
+          {!detail && <Row label="仕事内容" value={job.description} />}
         </dl>
+
+        {/* 詳細項目。未取得の求人では出さず、上の概要だけになる（段階的にバックフィルするため）。 */}
+        {detail &&
+          EXTERNAL_DETAIL_GROUPS.map(({ group, items }) => {
+            const rows = items.filter(([col]) => detail[col])
+            if (rows.length === 0) return null
+            return (
+              <section key={group} className="mt-8">
+                <h2 className="border-l-4 border-primary pl-3 text-lg font-bold text-gray-900">
+                  {group}
+                </h2>
+                <dl className="mt-3">
+                  {rows.map(([col, label]) => (
+                    <Row key={col} label={label} value={detail[col]} />
+                  ))}
+                </dl>
+              </section>
+            )
+          })}
 
         {/* 応募導線は他の求人と同じ */}
         <div className="mt-8">

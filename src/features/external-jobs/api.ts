@@ -16,6 +16,8 @@ const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVydmtneW9odHFmeG15bWFpdnRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1OTU1NzUsImV4cCI6MjEwMDE3MTU3NX0.NhE3dVLHaWbYRILQ5PW4p-CmGkr3ELUj_IXX6QIjxvs"
 
 const VIEW = "external_public_jobs"
+// 詳細項目は別ビュー。本体が status=active のものだけを返す（掲載終了は自動で消える）。
+const DETAIL_VIEW = "external_public_job_details"
 const REVALIDATE = 3600
 
 /**
@@ -137,9 +139,10 @@ function mapRow(r: Record<string, unknown>): ExternalJob {
 async function rawQuery(
   params: Record<string, string>,
   wantCount = false,
+  view: string = VIEW,
 ): Promise<{ rows: Record<string, unknown>[]; count: number }> {
   const qs = new URLSearchParams(params).toString()
-  const url = `${SUPABASE_URL}/rest/v1/${VIEW}?${qs}`
+  const url = `${SUPABASE_URL}/rest/v1/${view}?${qs}`
   const headers: Record<string, string> = {
     apikey: SUPABASE_ANON_KEY,
     Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
@@ -399,6 +402,63 @@ export const getExternalMuniHubCounts = unstable_cache(
 )
 
 /** 外部求人1件（詳細ページ用）。存在しなければ null。 */
+/**
+ * 詳細ページの表示項目（Phase 1 / 2026-08-07）。ラベルと順序をここで定義する。
+ * 公開ビュー external_public_job_details が返す列だけを並べており、
+ * 担当者・地図・会社所在地・法人番号・事業内容・会社の特長はそもそも存在しない
+ * （取り込み段階で落としているため、表示制御ではなくデータとして持っていない）。
+ * 勤務地はここに無い: 詳細ページの住所は番地まで載っていて企業を特定できるため、
+ * 本体レコードの prefecture / municipality_name から市区町村までに丸めて出す。
+ */
+export const EXTERNAL_DETAIL_GROUPS: Array<{ group: string; items: Array<[string, string]> }> = [
+  { group: "仕事内容", items: [
+    ["work_content", "仕事の内容"], ["employment_form", "雇用形態"], ["job_class", "求人区分"],
+    ["contract_period", "雇用期間"], ["trial_period", "試用期間"], ["recruit_reason", "募集の理由"],
+  ] },
+  { group: "応募条件", items: [
+    ["experience", "必要な経験等"], ["education", "学歴"], ["license_required", "必要な免許・資格"],
+    ["driver_license", "普通自動車運転免許"], ["age_limit", "年齢"],
+  ] },
+  { group: "勤務条件", items: [
+    ["work_hours_detail", "就業時間"], ["overtime", "時間外労働"], ["break_time", "休憩時間"],
+    ["annual_holidays", "年間休日"], ["holidays", "休日"], ["monthly_workdays", "月平均労働日数"],
+    ["paid_leave", "年次有給休暇"], ["nearest_station", "最寄り駅"],
+    ["car_commute", "マイカー通勤"], ["relocation", "転勤"],
+  ] },
+  { group: "待遇・福利厚生", items: [
+    ["salary_detail", "賃金"], ["raise_", "昇給"], ["bonus", "賞与"],
+    ["commute_allowance", "通勤手当"], ["insurance", "加入保険"],
+    ["retirement_plan", "退職金制度"], ["retirement_age", "定年制"], ["rehire", "再雇用制度"],
+    ["training", "研修制度"], ["smoking_policy", "受動喫煙対策"],
+  ] },
+  { group: "職場", items: [["employee_count", "従業員数"]] },
+  { group: "選考", items: [["selection_method", "選考方法"], ["application_docs", "応募書類"]] },
+]
+
+const DETAIL_COLUMNS = EXTERNAL_DETAIL_GROUPS.flatMap((g) => g.items.map(([c]) => c)).join(",")
+
+/** 詳細ページの項目を取得。未取得の求人では null（従来の表示に落ちるだけ）。 */
+export const getExternalJobDetail = async (
+  source: string,
+  sourceId: string,
+): Promise<Record<string, string> | null> => {
+  const { rows } = await rawQuery(
+    {
+      select: DETAIL_COLUMNS,
+      source: `eq.${source}`,
+      source_id: `eq.${sourceId}`,
+      limit: "1",
+    },
+    false,
+    DETAIL_VIEW,
+  )
+  const r = rows[0]
+  if (!r) return null
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(r)) if (typeof v === "string" && v.trim()) out[k] = v
+  return Object.keys(out).length ? out : null
+}
+
 /**
  * 応募の社内通知用に、伏せていない社名だけをサーバー側で引く。
  * ⚠ この戻り値をクライアントコンポーネントの props に渡さないこと。渡すとRSCペイロードに載り、
