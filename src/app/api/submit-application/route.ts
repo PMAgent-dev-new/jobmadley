@@ -23,6 +23,8 @@ import { sendApplicantSms, type SmsChannel } from "@/shared/sms/applicantSms"
 import { sendMetaCapiLead } from "@/shared/meta/capi"
 import { detectTestApplication, type TestDetection } from "@/shared/application/testDetection"
 import { isMetaCatalogJob } from "@/shared/lib/catalog-eligibility"
+import { getExternalCompanyName } from "@/features/external-jobs/api"
+import { parseExternalApplyId } from "@/features/external-jobs/apply-id"
 import { isExternalJobId } from "@/features/external-jobs/apply-id"
 
 interface ApplicationPayload {
@@ -278,6 +280,15 @@ export async function POST(request: Request) {
 
     const incoming = (await request.json()) as ApplicationPayload
     resolveApplicationSource(incoming, new URL(request.url))
+
+    // 転載求人は掲載企業を伏せているため、応募フォームは社名を持たない（ブラウザに出さないため）。
+    // 社内通知とLark Baseには実名が要るので、ここで jobId から引き直す。
+    // クライアントの申告ではなくサーバー側で解決するので、詐称もできない。
+    // 分類（detectCpOne / detectPmAgent）より前に入れて、従来と同じ値で判定させる。
+    const ext = incoming.jobId ? parseExternalApplyId(incoming.jobId) : null
+    if (ext && !incoming.companyName) {
+      incoming.companyName = await getExternalCompanyName(ext.source, ext.sourceId)
+    }
 
     console.log("[INFO] Raw Request Data (Pretty Formatted):")
     console.log(JSON.stringify(incoming, null, 2))

@@ -31,8 +31,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { source, id } = await params
   const job = await getExternalJob(source, decodeURIComponent(id))
   if (!job) return { title: "求人が見つかりません", robots: { index: false, follow: false } }
+  // 社名はタイトルに出さない（転載求人は掲載企業を伏せる方針）。job.companyName は
+  // api 側で常に undefined になるが、ここで参照しないこと自体を仕様として明示しておく。
   return {
-    title: `${job.title ?? "求人"}｜${job.companyName ?? ""}`,
+    title: `${job.title ?? "求人"}｜${job.prefecture ?? ""}の求人`,
     description: `${job.prefecture ?? ""}の${job.title ?? "求人"}の求人情報。`,
     robots: { index: false, follow: true },
   }
@@ -97,7 +99,8 @@ export default async function Page({ params }: Props) {
         </nav>
 
         <h1 className="text-2xl font-bold text-gray-900">{job.title ?? "求人"}</h1>
-        {job.companyName && <p className="mt-1 text-gray-600">{job.companyName}</p>}
+        {/* 掲載企業は伏せる。空欄にすると情報の欠落に見えるため、伏せていることを明示する。 */}
+        <p className="mt-1 text-gray-600">掲載企業：非公開</p>
 
         <dl className="mt-6">
           <Row label="勤務地" value={job.address || job.prefecture} />

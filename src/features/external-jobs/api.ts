@@ -22,12 +22,42 @@ const REVALIDATE = 3600
  * 画面で使う列だけを取得する。取得元を示す列（source_name / source_url / hw_office）は
  * 表示しない方針のため、そもそも取りに行かない。取得するとレンダリング結果に含まれず
  * ともRSCペイロードへ載り、ページのソースから読めてしまう。
+ *
+ * company_name はここでは取得するが、mapRow で **返さない**（2026-08-07 三木さん決定＝
+ * 転載求人は社名を伏せる）。取得が必要なのは、社名が company_name 欄だけでなく
+ * 勤務地・仕事内容・求人タイトルの本文中にも現れるため（実測: 勤務地12.5% / 仕事内容1.2% /
+ * タイトル0.3%）。伏せ字にするには元の社名が要る。使ったあとは捨てるのでブラウザには出ない。
+ * 応募の社内通知にだけ実名が要るため、それは getExternalCompanyName がサーバー側で別取得する。
  */
 const SELECT_COLUMNS = [
   "source", "source_id", "title", "company_name", "prefecture", "municipality_name", "address",
   "job_category", "employment_type", "salary_kind", "salary_min", "salary_max",
   "salary_raw", "work_hours", "description",
 ].join(",")
+
+/**
+ * 社名の識別子部分（法人格と空白を除いた中核）。「株式会社 トッキュウ」→「トッキュウ」。
+ * 1文字だと誤爆する（例「東」）ので2文字未満は伏せ字の対象にしない。
+ */
+const companyCore = (name?: string): string => {
+  const c = (name ?? "")
+    .replace(/(株式会社|有限会社|合同会社|合資会社|合名会社|\(株\)|（株）|\(有\)|（有）)/g, "")
+    .replace(/[\s　]/g, "")
+  return c.length >= 2 ? c : ""
+}
+
+/** 本文中に現れる社名を伏せる。表記ゆれ（社名内の空白）に対応するため空白を挟んだ形も消す。 */
+const redact = (text: string | undefined, name?: string): string | undefined => {
+  if (!text) return text
+  let out = text
+  const full = (name ?? "").trim()
+  const core = companyCore(name)
+  for (const n of [full, core].filter((x) => x.length >= 2)) {
+    const pat = n.split("").map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s　]*")
+    out = out.replace(new RegExp(pat, "g"), "非公開")
+  }
+  return out.replace(/(非公開[\s　]*){2,}/g, "非公開")
+}
 
 /**
  * 自社ハブの職種 slug → 外部の job_category 名。複数の外部カテゴリを1ハブに合流させる
@@ -72,17 +102,24 @@ export { externalApplyId, parseExternalApplyId, isExternalJobId } from "./apply-
 function mapRow(r: Record<string, unknown>): ExternalJob {
   const num = (v: unknown) => (typeof v === "number" ? v : v == null ? undefined : Number(v))
   const str = (v: unknown) => (typeof v === "string" ? v : undefined)
+  // 社名は伏せ字処理に使うだけで、返り値には含めない（＝RSCペイロードにも載らない）。
+  const company = str(r.company_name)
+  const pref = str(r.prefecture)
+  const muni = str(r.municipality_name)
   return {
     source: String(r.source ?? ""),
     sourceId: String(r.source_id ?? ""),
     sourceName: String(r.source_name ?? ""),
     sourceUrl: str(r.source_url),
     hwOffice: str(r.hw_office),
-    title: str(r.title),
-    companyName: str(r.company_name),
-    prefecture: str(r.prefecture),
-    municipalityName: str(r.municipality_name),
-    address: str(r.address),
+    title: redact(str(r.title), company),
+    companyName: undefined,
+    prefecture: pref,
+    municipalityName: muni,
+    // 生の住所は出さない。12.9%が番地まで載っており、検索すれば掲載企業が特定できるため
+    // （社名を伏せる意味が無くなる）。市区町村までに丸める。municipality_name の付与率は98.7%で、
+    // 未付与のときだけ都道府県まで。
+    address: muni ? `${pref ?? ""}${muni}` : pref,
     jobCategory: str(r.job_category),
     employmentType: str(r.employment_type),
     salaryKind: str(r.salary_kind),
@@ -90,7 +127,7 @@ function mapRow(r: Record<string, unknown>): ExternalJob {
     salaryMax: num(r.salary_max),
     salaryRaw: str(r.salary_raw),
     workHours: str(r.work_hours),
-    description: str(r.description),
+    description: redact(str(r.description), company),
     receivedAt: str(r.received_at),
     expiresAt: str(r.expires_at),
     lastSeen: str(r.last_seen),
@@ -362,6 +399,26 @@ export const getExternalMuniHubCounts = unstable_cache(
 )
 
 /** 外部求人1件（詳細ページ用）。存在しなければ null。 */
+/**
+ * 応募の社内通知用に、伏せていない社名だけをサーバー側で引く。
+ * ⚠ この戻り値をクライアントコンポーネントの props に渡さないこと。渡すとRSCペイロードに載り、
+ *   表示していなくてもページのソースから読めてしまう（source_name で実際に起きた事故と同型）。
+ *   呼び出してよいのは Route Handler / Server Action の内側だけ。
+ */
+export const getExternalCompanyName = async (
+  source: string,
+  sourceId: string,
+): Promise<string | undefined> => {
+  const { rows } = await rawQuery({
+    select: "company_name",
+    source: `eq.${source}`,
+    source_id: `eq.${sourceId}`,
+    limit: "1",
+  })
+  const v = rows[0]?.company_name
+  return typeof v === "string" && v ? v : undefined
+}
+
 export const getExternalJob = async (
   source: string,
   sourceId: string,

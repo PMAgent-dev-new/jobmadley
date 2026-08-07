@@ -31,7 +31,10 @@ export default async function ApplicationPage({ params }: ApplicationPageProps) 
       id,
       title: e.title ?? "求人",
       jobName: e.title,
-      companyName: e.companyName,
+      // 社名はクライアントへ渡さない。ApplicationForm は "use client" なので、
+      // 画面に出さなくても props はRSCペイロードに載り、ページのソースから読めてしまう。
+      // 社内通知に必要な実名は submit-application が jobId から サーバー側で引き直す。
+      companyName: undefined,
       salaryMin: e.salaryMin,
       salaryMax: e.salaryMax,
       employmentType: e.employmentType ? [e.employmentType] : undefined,

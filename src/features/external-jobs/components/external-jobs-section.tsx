@@ -41,7 +41,9 @@ function ExternalJobCard({ job }: { job: ExternalJob }) {
       <h3 className="line-clamp-2 font-semibold text-gray-900 group-hover:underline">
         {job.title || "求人"}
       </h3>
-      {job.companyName && <p className="mt-1 text-sm text-gray-600">{job.companyName}</p>}
+      {/* 掲載企業は伏せる（2026-08-07決定）。api 側で companyName は返らないが、
+          カードの体裁を他の求人と揃えるため同じ位置に一行置く。 */}
+      <p className="mt-1 text-sm text-gray-500">掲載企業：非公開</p>
       <dl className="mt-3 space-y-1 text-sm text-gray-700">
         {(job.prefecture || job.address) && (
           <div className="flex gap-2">
