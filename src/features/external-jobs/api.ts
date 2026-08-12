@@ -16,18 +16,50 @@ const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVydmtneW9odHFmeG15bWFpdnRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ1OTU1NzUsImV4cCI6MjEwMDE3MTU3NX0.NhE3dVLHaWbYRILQ5PW4p-CmGkr3ELUj_IXX6QIjxvs"
 
 const VIEW = "external_public_jobs"
+// 詳細項目は別ビュー。本体が status=active のものだけを返す（掲載終了は自動で消える）。
+const DETAIL_VIEW = "external_public_job_details"
 const REVALIDATE = 3600
 
 /**
  * 画面で使う列だけを取得する。取得元を示す列（source_name / source_url / hw_office）は
  * 表示しない方針のため、そもそも取りに行かない。取得するとレンダリング結果に含まれず
  * ともRSCペイロードへ載り、ページのソースから読めてしまう。
+ *
+ * company_name はここでは取得するが、mapRow で **返さない**（2026-08-07 三木さん決定＝
+ * 転載求人は社名を伏せる）。取得が必要なのは、社名が company_name 欄だけでなく
+ * 勤務地・仕事内容・求人タイトルの本文中にも現れるため（実測: 勤務地12.5% / 仕事内容1.2% /
+ * タイトル0.3%）。伏せ字にするには元の社名が要る。使ったあとは捨てるのでブラウザには出ない。
+ * 応募の社内通知にだけ実名が要るため、それは getExternalCompanyName がサーバー側で別取得する。
  */
 const SELECT_COLUMNS = [
   "source", "source_id", "title", "company_name", "prefecture", "municipality_name", "address",
   "job_category", "employment_type", "salary_kind", "salary_min", "salary_max",
   "salary_raw", "work_hours", "description",
 ].join(",")
+
+/**
+ * 社名の識別子部分（法人格と空白を除いた中核）。「株式会社 トッキュウ」→「トッキュウ」。
+ * 1文字だと誤爆する（例「東」）ので2文字未満は伏せ字の対象にしない。
+ */
+const companyCore = (name?: string): string => {
+  const c = (name ?? "")
+    .replace(/(株式会社|有限会社|合同会社|合資会社|合名会社|\(株\)|（株）|\(有\)|（有）)/g, "")
+    .replace(/[\s　]/g, "")
+  return c.length >= 2 ? c : ""
+}
+
+/** 本文中に現れる社名を伏せる。表記ゆれ（社名内の空白）に対応するため空白を挟んだ形も消す。 */
+const redact = (text: string | undefined, name?: string): string | undefined => {
+  if (!text) return text
+  let out = text
+  const full = (name ?? "").trim()
+  const core = companyCore(name)
+  for (const n of [full, core].filter((x) => x.length >= 2)) {
+    const pat = n.split("").map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s　]*")
+    out = out.replace(new RegExp(pat, "g"), "非公開")
+  }
+  return out.replace(/(非公開[\s　]*){2,}/g, "非公開")
+}
 
 /**
  * 自社ハブの職種 slug → 外部の job_category 名。複数の外部カテゴリを1ハブに合流させる
@@ -72,17 +104,24 @@ export { externalApplyId, parseExternalApplyId, isExternalJobId } from "./apply-
 function mapRow(r: Record<string, unknown>): ExternalJob {
   const num = (v: unknown) => (typeof v === "number" ? v : v == null ? undefined : Number(v))
   const str = (v: unknown) => (typeof v === "string" ? v : undefined)
+  // 社名は伏せ字処理に使うだけで、返り値には含めない（＝RSCペイロードにも載らない）。
+  const company = str(r.company_name)
+  const pref = str(r.prefecture)
+  const muni = str(r.municipality_name)
   return {
     source: String(r.source ?? ""),
     sourceId: String(r.source_id ?? ""),
     sourceName: String(r.source_name ?? ""),
     sourceUrl: str(r.source_url),
     hwOffice: str(r.hw_office),
-    title: str(r.title),
-    companyName: str(r.company_name),
-    prefecture: str(r.prefecture),
-    municipalityName: str(r.municipality_name),
-    address: str(r.address),
+    title: redact(str(r.title), company),
+    companyName: undefined,
+    prefecture: pref,
+    municipalityName: muni,
+    // 生の住所は出さない。12.9%が番地まで載っており、検索すれば掲載企業が特定できるため
+    // （社名を伏せる意味が無くなる）。市区町村までに丸める。municipality_name の付与率は98.7%で、
+    // 未付与のときだけ都道府県まで。
+    address: muni ? `${pref ?? ""}${muni}` : pref,
     jobCategory: str(r.job_category),
     employmentType: str(r.employment_type),
     salaryKind: str(r.salary_kind),
@@ -90,7 +129,7 @@ function mapRow(r: Record<string, unknown>): ExternalJob {
     salaryMax: num(r.salary_max),
     salaryRaw: str(r.salary_raw),
     workHours: str(r.work_hours),
-    description: str(r.description),
+    description: redact(str(r.description), company),
     receivedAt: str(r.received_at),
     expiresAt: str(r.expires_at),
     lastSeen: str(r.last_seen),
@@ -100,9 +139,10 @@ function mapRow(r: Record<string, unknown>): ExternalJob {
 async function rawQuery(
   params: Record<string, string>,
   wantCount = false,
+  view: string = VIEW,
 ): Promise<{ rows: Record<string, unknown>[]; count: number }> {
   const qs = new URLSearchParams(params).toString()
-  const url = `${SUPABASE_URL}/rest/v1/${VIEW}?${qs}`
+  const url = `${SUPABASE_URL}/rest/v1/${view}?${qs}`
   const headers: Record<string, string> = {
     apikey: SUPABASE_ANON_KEY,
     Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
@@ -134,11 +174,31 @@ async function query(
   return { rows: rows.map(mapRow), count }
 }
 
+/**
+ * 並び順は必ず一意に定まるようにする（source_id をタイブレーカーに置く）。
+ * last_seen / received_date は取り込みバッチ単位で同値になる行が非常に多く、
+ * これだけで order すると PostgREST の offset ページングでページ間の取りこぼしと
+ * 重複が発生する（東京都×トラックの「もっと見る」で 248 件中 247 件しか辿れなかった）。
+ */
+const ORDER_HUB = "last_seen.desc,source_id.asc"
+const ORDER_MUNI = "received_date.desc.nullslast,source_id.asc"
+
+/**
+ * 外部求人セクションの1画面あたりの表示件数。「もっと見る」もこの単位で追加する。
+ * ハブは4列グリッドなので4の倍数にしておく。
+ */
+export const EXTERNAL_PAGE_SIZE = 24
+
+/** offset を PostgREST パラメータへ。0/未指定のときは付けない（既存クエリのキャッシュキーを変えないため）。 */
+const offsetParam = (offset?: number): Record<string, string> =>
+  offset && offset > 0 ? { offset: String(offset) } : {}
+
 /** ハブ（県×職種）向けの外部求人と総件数。県は prefectures.region（例「東京都」）＝外部 prefecture と一致。 */
 export const getExternalJobsForHub = async (params: {
   prefectureRegion: string
   hubCatSlug: string
   limit?: number
+  offset?: number
 }): Promise<{ jobs: ExternalJob[]; count: number }> => {
   const cats = HUB_SLUG_TO_EXTERNAL_CATEGORIES[params.hubCatSlug]
   if (!cats || !params.prefectureRegion) return { jobs: [], count: 0 }
@@ -148,8 +208,9 @@ export const getExternalJobsForHub = async (params: {
       select: SELECT_COLUMNS,
       prefecture: `eq.${params.prefectureRegion}`,
       job_category: `in.${inList}`,
-      order: "last_seen.desc",
-      limit: String(params.limit ?? 24),
+      order: ORDER_HUB,
+      limit: String(params.limit ?? EXTERNAL_PAGE_SIZE),
+      ...offsetParam(params.offset),
     },
     true,
   )
@@ -162,6 +223,7 @@ export const getExternalJobsForMuniHub = async (params: {
   municipalityName: string
   hubCatSlug: string
   limit?: number
+  offset?: number
 }): Promise<{ jobs: ExternalJob[]; count: number }> => {
   const cats = HUB_SLUG_TO_EXTERNAL_CATEGORIES[params.hubCatSlug]
   if (!cats || !params.prefectureRegion || !params.municipalityName) return { jobs: [], count: 0 }
@@ -172,8 +234,9 @@ export const getExternalJobsForMuniHub = async (params: {
       prefecture: `eq.${params.prefectureRegion}`,
       municipality_name: `eq.${params.municipalityName}`,
       job_category: `in.${inList}`,
-      order: "received_date.desc.nullslast",
-      limit: String(params.limit ?? 24),
+      order: ORDER_MUNI,
+      limit: String(params.limit ?? EXTERNAL_PAGE_SIZE),
+      ...offsetParam(params.offset),
     },
     true,
   )
@@ -184,6 +247,7 @@ export const getExternalJobsForMuniHub = async (params: {
 export const getExternalJobsForCategory = async (params: {
   hubCatSlug: string
   limit?: number
+  offset?: number
 }): Promise<{ jobs: ExternalJob[]; count: number }> => {
   const cats = HUB_SLUG_TO_EXTERNAL_CATEGORIES[params.hubCatSlug]
   if (!cats) return { jobs: [], count: 0 }
@@ -192,8 +256,9 @@ export const getExternalJobsForCategory = async (params: {
     {
       select: SELECT_COLUMNS,
       job_category: `in.${inList}`,
-      order: "last_seen.desc",
-      limit: String(params.limit ?? 24),
+      order: ORDER_HUB,
+      limit: String(params.limit ?? EXTERNAL_PAGE_SIZE),
+      ...offsetParam(params.offset),
     },
     true,
   )
@@ -337,6 +402,83 @@ export const getExternalMuniHubCounts = unstable_cache(
 )
 
 /** 外部求人1件（詳細ページ用）。存在しなければ null。 */
+/**
+ * 詳細ページの表示項目（Phase 1 / 2026-08-07）。ラベルと順序をここで定義する。
+ * 公開ビュー external_public_job_details が返す列だけを並べており、
+ * 担当者・地図・会社所在地・法人番号・事業内容・会社の特長はそもそも存在しない
+ * （取り込み段階で落としているため、表示制御ではなくデータとして持っていない）。
+ * 勤務地はここに無い: 詳細ページの住所は番地まで載っていて企業を特定できるため、
+ * 本体レコードの prefecture / municipality_name から市区町村までに丸めて出す。
+ */
+export const EXTERNAL_DETAIL_GROUPS: Array<{ group: string; items: Array<[string, string]> }> = [
+  { group: "仕事内容", items: [
+    ["work_content", "仕事の内容"], ["employment_form", "雇用形態"], ["job_class", "求人区分"],
+    ["contract_period", "雇用期間"], ["trial_period", "試用期間"], ["recruit_reason", "募集の理由"],
+  ] },
+  { group: "応募条件", items: [
+    ["experience", "必要な経験等"], ["education", "学歴"], ["license_required", "必要な免許・資格"],
+    ["driver_license", "普通自動車運転免許"], ["age_limit", "年齢"],
+  ] },
+  { group: "勤務条件", items: [
+    ["work_hours_detail", "就業時間"], ["overtime", "時間外労働"], ["break_time", "休憩時間"],
+    ["annual_holidays", "年間休日"], ["holidays", "休日"], ["monthly_workdays", "月平均労働日数"],
+    ["paid_leave", "年次有給休暇"], ["nearest_station", "最寄り駅"],
+    ["car_commute", "マイカー通勤"], ["relocation", "転勤"],
+  ] },
+  { group: "待遇・福利厚生", items: [
+    ["salary_detail", "賃金"], ["raise_", "昇給"], ["bonus", "賞与"],
+    ["commute_allowance", "通勤手当"], ["insurance", "加入保険"],
+    ["retirement_plan", "退職金制度"], ["retirement_age", "定年制"], ["rehire", "再雇用制度"],
+    ["training", "研修制度"], ["smoking_policy", "受動喫煙対策"],
+  ] },
+  { group: "職場", items: [["employee_count", "従業員数"]] },
+  { group: "選考", items: [["selection_method", "選考方法"], ["application_docs", "応募書類"]] },
+]
+
+const DETAIL_COLUMNS = EXTERNAL_DETAIL_GROUPS.flatMap((g) => g.items.map(([c]) => c)).join(",")
+
+/** 詳細ページの項目を取得。未取得の求人では null（従来の表示に落ちるだけ）。 */
+export const getExternalJobDetail = async (
+  source: string,
+  sourceId: string,
+): Promise<Record<string, string> | null> => {
+  const { rows } = await rawQuery(
+    {
+      select: DETAIL_COLUMNS,
+      source: `eq.${source}`,
+      source_id: `eq.${sourceId}`,
+      limit: "1",
+    },
+    false,
+    DETAIL_VIEW,
+  )
+  const r = rows[0]
+  if (!r) return null
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(r)) if (typeof v === "string" && v.trim()) out[k] = v
+  return Object.keys(out).length ? out : null
+}
+
+/**
+ * 応募の社内通知用に、伏せていない社名だけをサーバー側で引く。
+ * ⚠ この戻り値をクライアントコンポーネントの props に渡さないこと。渡すとRSCペイロードに載り、
+ *   表示していなくてもページのソースから読めてしまう（source_name で実際に起きた事故と同型）。
+ *   呼び出してよいのは Route Handler / Server Action の内側だけ。
+ */
+export const getExternalCompanyName = async (
+  source: string,
+  sourceId: string,
+): Promise<string | undefined> => {
+  const { rows } = await rawQuery({
+    select: "company_name",
+    source: `eq.${source}`,
+    source_id: `eq.${sourceId}`,
+    limit: "1",
+  })
+  const v = rows[0]?.company_name
+  return typeof v === "string" && v ? v : undefined
+}
+
 export const getExternalJob = async (
   source: string,
   sourceId: string,

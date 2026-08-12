@@ -8,6 +8,7 @@ import {
   hasExternalJobsForCategory,
   HUB_KEEP_MUNI_JOBS,
   HUB_MIN_MUNI_JOBS,
+  EXTERNAL_PAGE_SIZE,
 } from "@/features/external-jobs/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
 import {
@@ -113,7 +114,7 @@ export default async function Page({ params }: Props) {
         prefectureRegion: pref.region,
         municipalityName: muni.name,
         hubCatSlug: cat.slug!,
-        limit: 24,
+        limit: EXTERNAL_PAGE_SIZE,
       })
     : { jobs: [], count: 0 }
 
@@ -152,6 +153,7 @@ export default async function Page({ params }: Props) {
         region: `${pref.region}${muni.name}`,
         catName: cat.name,
         selfJobsHref: moreHref,
+        query: { cat: cat.slug!, pref: pref.region, muni: muni.name },
       }}
       moreHref={moreHref}
       related={[
