@@ -41,7 +41,9 @@ export function buildBirthDate(year: string, month: string, day: string): string
 // 整備士求人の応募先メール。@/shared/lark/routing の MECHANIC_APPLY_EMAIL と一致させること。
 // （routing.ts は larkEnv を import するためクライアントに持ち込まず、値のみ複製している）
 const MECHANIC_APPLY_EMAIL = "ridejob.mechanic@pmagent.jp"
-const APPLICANTS_BASE = "https://ridejob.pmagent.jp"
+// form_applicant は basePath=/entry で ridejob.jp に配信されている。
+// 旧 ridejob.pmagent.jp（basePathなし）と同じページが /entry 配下に存在する。
+const APPLICANTS_BASE = "https://ridejob.jp/entry"
 
 /**
  * 応募完了ページのURLを求人種別で出し分ける。
