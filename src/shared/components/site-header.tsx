@@ -21,7 +21,7 @@ export default function SiteHeader() {
           </Link>
 
           <div className={styles.actions}>
-            <a href="https://ridejob.pmagent.jp/" target="_blank" rel="noopener noreferrer" className={`${styles.btn} ${styles.btnSecondary}`}>
+            <a href="/entry" className={`${styles.btn} ${styles.btnSecondary}`}>
               まずお話を聞く
             </a>
             <Link href="/search" className={`${styles.btn} ${styles.btnPrimary}`}>
@@ -42,9 +42,7 @@ export default function SiteHeader() {
                 </SheetHeader>
                 <div className={styles.mobileMenu}>
                   <a
-                    href="https://ridejob.pmagent.jp/"
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    href="/entry"
                     className={`${styles.btn} ${styles.btnSecondary}`}
                   >
                     まずお話を聞く
