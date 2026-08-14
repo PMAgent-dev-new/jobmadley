@@ -106,7 +106,7 @@ export default async function Page({ params }: Props) {
         { name: `${pref.region}の求人` },
       ]}
       h1={`${pref.region}のドライバー・整備士求人`}
-      lead={content?.lead || hubLead.prefecture(pref.region, totalCount)}
+      lead={content?.lead || hubLead.prefecture(pref.region, totalCount + (external?.count ?? 0))}
       bodyHtml={content?.body}
       summaryLabel={pref.region}
       summary={buildHubSummary(pref.region, stats)}
@@ -115,7 +115,7 @@ export default async function Page({ params }: Props) {
       jobs={jobs}
       jobLinks={jobLinks}
       external={external}
-      faqs={buildHubFaqs({ region: pref.region, stats })}
+      faqs={buildHubFaqs({ region: pref.region, stats, externalCount: external?.count ?? 0 })}
       moreHref={searchUrl({ prefectureId: pref.id })}
       related={[{ title: `${pref.region}の職種から探す`, links: catsInKen }]}
     />

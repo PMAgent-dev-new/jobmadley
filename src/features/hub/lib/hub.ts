@@ -324,6 +324,8 @@ const percentile = (sorted: number[], p: number): number =>
  * 情報量がゼロになるどころか誇大に見える。四分位で中心帯を出し、母数が少なければ出さない。
  */
 const SALARY_MIN_SAMPLE = 10
+/** これ未満は中央値も出さない（1件の入替で数字が動くため） */
+const SALARY_MIN_MEDIAN = 5
 
 export const computeHubStats = (jobs: Job[]): HubStats => {
   // 給与は「月給」の求人だけで集計する。時給・日給・年収の求人を混ぜると
@@ -341,10 +343,15 @@ export const computeHubStats = (jobs: Job[]): HubStats => {
     .sort((a, b) => a - b)
   const salarySampleSize = mins.length
   const salaryMedian = salarySampleSize > 0 ? percentile(mins, 0.5) : undefined
-  const salaryText =
-    salarySampleSize >= SALARY_MIN_SAMPLE
-      ? `月給${yen(percentile(mins, 0.25))}〜${yen(percentile(mins, 0.75))}`
-      : undefined
+  // 母数が10件に満たなくても、5件あれば中央値なら意味を持つ。情報を消すより中央値で残す。
+  // 下限額が横並びのハブでは p25==p75 で「月給23万円〜23万円」という縮退帯が出るので畳む。
+  const salaryText = (() => {
+    if (salarySampleSize < SALARY_MIN_MEDIAN) return undefined
+    if (salarySampleSize < SALARY_MIN_SAMPLE) return `月給${yen(salaryMedian!)}前後`
+    const lo = percentile(mins, 0.25)
+    const hi = percentile(mins, 0.75)
+    return lo === hi ? `月給${yen(lo)}前後` : `月給${yen(lo)}〜${yen(hi)}`
+  })()
 
   const empCount: Record<string, number> = {}
   for (const j of jobs) for (const e of j.employmentType ?? []) empCount[e] = (empCount[e] ?? 0) + 1
