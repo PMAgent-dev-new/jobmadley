@@ -77,8 +77,8 @@ interface Props {
   selfJobsHref: string
   /** 自社求人の件数。0 のときは selfJobsHref の先が 0 件になるため導線を出さない。 */
   selfJobsCount: number
-  /** 「もっと見る」用。/api/external-jobs にそのまま渡す。 */
-  query: { cat: string; pref?: string; muni?: string }
+  /** 「もっと見る」用。/api/external-jobs にそのまま渡す。cat か feature のどちらかを必ず入れる。 */
+  query: { cat?: string; feature?: string; pref?: string; muni?: string }
 }
 
 export default function ExternalJobsSection({
@@ -102,7 +102,10 @@ export default function ExternalJobsSection({
     setLoading(true)
     setFailed(false)
     try {
-      const p = new URLSearchParams({ cat: query.cat, offset: String(items.length) })
+      const p = new URLSearchParams({ offset: String(items.length) })
+      // 初期表示と同じ条件で続ける。ここが食い違うと25件目から別の求人が混ざる
+      if (query.cat) p.set("cat", query.cat)
+      if (query.feature) p.set("feature", query.feature)
       if (query.pref) p.set("pref", query.pref)
       if (query.muni) p.set("muni", query.muni)
       const res = await fetch(`/api/external-jobs?${p.toString()}`)

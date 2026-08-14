@@ -29,6 +29,7 @@ import {
   hubArticleKeyword,
   hubCategorySynonym,
   catNameWithSynonym,
+  featuresForCatSlug,
 } from "@/features/hub/lib/hub"
 
 // オンデマンドISR（generateStaticParams=[] で動的セグメントをISR化）。ページングは廃止し
@@ -148,6 +149,15 @@ export default async function Page({ params }: Props) {
       moreHref={moreHref}
       external={external}
       related={[
+        ...(featuresForCatSlug(cat.slug).length > 0
+          ? [{
+              title: "働き方から探す",
+              links: featuresForCatSlug(cat.slug).map((f) => ({
+                label: `${f.name}の求人一覧（全国）`,
+                href: hubUrl.feature(f.slug),
+              })),
+            }]
+          : []),
         ...(group
           ? [{ title: `${group.name}の求人を見る`, links: [{ label: `${group.name}の求人一覧（全国）`, href: hubUrl.group(group.slug) }] }]
           : []),
