@@ -15,7 +15,7 @@
  */
 
 /** 公開情報（所有権証明のため URL で配信する値）。env で上書き可能。 */
-export const INDEXNOW_KEY = process.env.INDEXNOW_KEY || "618a3ca5f4e2461db7c85a9f30d6e8c7"
+export const INDEXNOW_KEY = process.env.INDEXNOW_KEY || "618a3ca59ba50f4bc94b7a07d363d8db"
 
 /** IndexNow の受け口。どれか1つに送れば参加エンジン全体へ伝播する。 */
 const ENDPOINT = "https://api.indexnow.org/indexnow"
