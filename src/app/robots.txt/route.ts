@@ -54,6 +54,7 @@ export function GET() {
     "",
     `Sitemap: ${SITE_URL}/sitemap.xml`,
     `Sitemap: ${SITE_URL}/media/sitemap.xml`,
+    `Sitemap: ${SITE_URL}/ssw/sitemap.xml`,
     "",
   ].join("\n")
 
