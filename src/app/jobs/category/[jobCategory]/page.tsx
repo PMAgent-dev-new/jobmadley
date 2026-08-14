@@ -2,6 +2,12 @@ import { notFound } from "next/navigation"
 import type { Metadata } from "next"
 import HubPage from "@/features/hub/components/hub-page"
 import { getJobsPaged, getJobsForStats } from "@/features/jobs/api"
+import {
+  getExternalJobsForCategory,
+  hasExternalJobsForCategory,
+  getExternalCategoryCount,
+  EXTERNAL_PAGE_SIZE,
+} from "@/features/external-jobs/api"
 import { getMediaArticlesByKeyword } from "@/features/media/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
 import {
@@ -42,7 +48,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { categories, matrix } = await getHubData()
   const cat = categories.find((c) => c.slug === jobCategory)
   if (!cat) return { title: "求人が見つかりません", robots: { index: false, follow: false } }
-  const count = matrix.byCategory[cat.id] ?? 0
+  const selfCount = matrix.byCategory[cat.id] ?? 0
+  // 市区町村ハブでは合流済みなのに職種ハブは自社求人しか数えていなかった。
+  // トラックは自社5件・掲載7,404件で、title が「5件」になっていた。
+  const externalCount = hasExternalJobsForCategory(cat.slug)
+    ? await getExternalCategoryCount([cat.slug!])
+    : 0
+  const count = selfCount + externalCount
   const base = hubUrl.category(cat.slug!)
   const content = await getHubContent(base)
   const synonym = hubCategorySynonym(cat.slug ?? undefined)
@@ -74,6 +86,25 @@ export default async function Page({ params }: Props) {
       label: `${p.region}の${cat.name}（${n}件）`,
       href: hubUrl.prefectureCategory(p.slug, cat.slug!),
     }))
+
+  const moreHref = searchUrl({ jobCategoryId: cat.id })
+  const external = hasExternalJobsForCategory(cat.slug)
+    ? await (async () => {
+        const { jobs: exJobs, count } = await getExternalJobsForCategory({
+          hubCatSlug: cat.slug!,
+          limit: EXTERNAL_PAGE_SIZE,
+        })
+        return {
+          jobs: exJobs,
+          count,
+          region: "全国",
+          catName: cat.name,
+          selfJobsHref: moreHref,
+          selfJobsCount: totalCount,
+          query: { cat: cat.slug! },
+        }
+      })()
+    : undefined
 
   const base = hubUrl.category(cat.slug!)
   const statsJobs = totalCount > jobs.length
@@ -114,7 +145,8 @@ export default async function Page({ params }: Props) {
       categoryContent={cc ? { catName: cat.name, ...cc } : undefined}
       faqs={buildHubFaqs({ catName: cat.name, catSlug: cat.slug!, stats })}
       relatedArticles={relatedArticles}
-      moreHref={searchUrl({ jobCategoryId: cat.id })}
+      moreHref={moreHref}
+      external={external}
       related={[
         ...(group
           ? [{ title: `${group.name}の求人を見る`, links: [{ label: `${group.name}の求人一覧（全国）`, href: hubUrl.group(group.slug) }] }]
