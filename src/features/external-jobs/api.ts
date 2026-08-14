@@ -265,6 +265,30 @@ export const getExternalJobsForCategory = async (params: {
   return { jobs: rows, count }
 }
 
+/** 職種グループハブ（例 /jobs/group/driver）向け。複数の職種slugをまとめて引く。 */
+export const getExternalJobsForCategories = async (params: {
+  hubCatSlugs: string[]
+  limit?: number
+  offset?: number
+}): Promise<{ jobs: ExternalJob[]; count: number }> => {
+  const cats = [
+    ...new Set(params.hubCatSlugs.flatMap((s) => HUB_SLUG_TO_EXTERNAL_CATEGORIES[s] ?? [])),
+  ]
+  if (cats.length === 0) return { jobs: [], count: 0 }
+  const inList = `(${cats.map((c) => `"${c}"`).join(",")})`
+  const { rows, count } = await query(
+    {
+      select: SELECT_COLUMNS,
+      job_category: `in.${inList}`,
+      order: ORDER_HUB,
+      limit: String(params.limit ?? EXTERNAL_PAGE_SIZE),
+      ...offsetParam(params.offset),
+    },
+    true,
+  )
+  return { jobs: rows, count }
+}
+
 /**
  * 外部求人だけでハブを「生成対象」に昇格させる最小件数。
  * 自社求人の HUB_MIN_JOBS(=5) と役割は同じだが、外部は在庫が桁違いに厚いので
@@ -324,6 +348,31 @@ export const getExternalHubCounts = unstable_cache(
     return counts
   },
   ["external-hub-counts"],
+  { revalidate: REVALIDATE },
+)
+
+/**
+ * 職種ハブ（全国）の外部求人件数。
+ *
+ * ⚠️ 県×職種マトリクス（getExternalHubCounts）を畳んで代用してはいけない。
+ * あちらは prefecture が空の行を落とすため実数より少なく出て、
+ * title と本文の「掲載件数」が食い違う（トラックで 7,380 と 9,166 になった）。
+ * 件数は本文と同じ実カウントを使い、unstable_cache で二重取得を避ける。
+ */
+export const getExternalCategoryCount = unstable_cache(
+  async (hubCatSlugs: string[]): Promise<number> => {
+    const cats = [
+      ...new Set(hubCatSlugs.flatMap((s) => HUB_SLUG_TO_EXTERNAL_CATEGORIES[s] ?? [])),
+    ]
+    if (cats.length === 0) return 0
+    const inList = `(${cats.map((c) => `"${c}"`).join(",")})`
+    const { count } = await query(
+      { select: "source_id", job_category: `in.${inList}`, limit: "1" },
+      true,
+    )
+    return count
+  },
+  ["external-category-count"],
   { revalidate: REVALIDATE },
 )
 

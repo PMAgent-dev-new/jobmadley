@@ -1,6 +1,11 @@
 import { notFound } from "next/navigation"
 import type { Metadata } from "next"
 import HubPage from "@/features/hub/components/hub-page"
+import {
+  getExternalJobsForCategories,
+  getExternalCategoryCount,
+  EXTERNAL_PAGE_SIZE,
+} from "@/features/external-jobs/api"
 import { getJobsByCategoryIds, getGroupJobsForStats } from "@/features/jobs/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
 import {
@@ -41,7 +46,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!group) return { title: "求人が見つかりません", robots: { index: false, follow: false } }
   const { categories, matrix } = await getHubData()
   const catIds = resolveCatIds(group, categories)
-  const count = catIds.reduce((s, id) => s + (matrix.byCategory[id] ?? 0), 0)
+  const selfCount = catIds.reduce((s, id) => s + (matrix.byCategory[id] ?? 0), 0)
+  const count = selfCount + await getExternalCategoryCount(group.catSlugs)
   const base = hubUrl.group(group.slug)
   const content = await getHubContent(base)
   return generateHubMetadata({
@@ -65,6 +71,22 @@ export default async function Page({ params }: Props) {
     limit: HUB_PAGE_SIZE,
   })
   const base = hubUrl.group(group.slug)
+
+  const { jobs: exJobs, count: exCount } = await getExternalJobsForCategories({
+    hubCatSlugs: group.catSlugs,
+    limit: EXTERNAL_PAGE_SIZE,
+  })
+  const external = exCount > 0
+    ? {
+        jobs: exJobs,
+        count: exCount,
+        region: "全国",
+        catName: group.name,
+        selfJobsHref: "/search",
+        selfJobsCount: totalCount,
+        query: { cat: group.catSlugs[0] },
+      }
+    : undefined
 
   const statsJobs = totalCount > jobs.length ? await getGroupJobsForStats(catIds) : jobs
   const stats = { ...computeHubStats(statsJobs), count: totalCount }
@@ -95,6 +117,7 @@ export default async function Page({ params }: Props) {
       jobs={jobs}
       jobLinks={jobLinks}
       faqs={buildHubFaqs({ catName: group.name, stats })}
+      external={external}
       related={[{ title: `${group.name}の職種から探す`, links: catLinks }]}
     />
   )
