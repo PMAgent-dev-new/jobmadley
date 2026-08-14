@@ -102,7 +102,9 @@ export default async function CompanyPage({ params }: Props) {
 
   const allJobs = await getFeaturedCompanyJobs(slug)
   const jobs = allJobs.slice(0, HUB_LIST_LIMIT)
-  const stats = computeHubStats(allJobs)
+  // 会社ページの求人はすべて同一企業のものなので、母数1件でも「その企業の提示額」であって
+  // 集計の外れ値ではない。地域ハブ用の下限（5件）をここに当てると純粋な情報損失になる。
+  const stats = computeHubStats(allJobs, { minSample: 1 })
   const regions = countNames(allJobs.map((job) => job.prefecture && ({ name: job.prefecture.region, slug: job.prefecture.slug })))
   const categories = countNames(allJobs.map((job) => job.jobCategory && ({ name: job.jobCategory.name, slug: job.jobCategory.slug })))
   const regionText = joinTopNames(regions, "全国")

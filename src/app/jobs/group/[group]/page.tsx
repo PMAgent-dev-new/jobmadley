@@ -116,7 +116,7 @@ export default async function Page({ params }: Props) {
       totalCount={totalCount}
       jobs={jobs}
       jobLinks={jobLinks}
-      faqs={buildHubFaqs({ catName: group.name, stats })}
+      faqs={buildHubFaqs({ catName: group.name, stats, externalCount: external?.count ?? 0 })}
       external={external}
       related={[{ title: `${group.name}の職種から探す`, links: catLinks }]}
     />

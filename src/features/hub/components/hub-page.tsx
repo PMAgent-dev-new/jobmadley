@@ -170,7 +170,7 @@ export default function HubPage({
             </div>
             {stats.salaryText && (
               <div className="rounded-lg bg-gray-50 p-3">
-                <dt className="text-xs text-gray-500">給与レンジ</dt>
+                <dt className="text-xs text-gray-500">月給の中心帯</dt>
                 <dd className="text-lg font-bold text-gray-900">{stats.salaryText}</dd>
               </div>
             )}

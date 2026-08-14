@@ -143,7 +143,7 @@ export default async function Page({ params }: Props) {
       jobs={jobs}
       jobLinks={jobLinks}
       categoryContent={cc ? { catName: cat.name, ...cc } : undefined}
-      faqs={buildHubFaqs({ catName: cat.name, catSlug: cat.slug!, stats })}
+      faqs={buildHubFaqs({ catName: cat.name, catSlug: cat.slug!, stats, externalCount: external?.count ?? 0 })}
       relatedArticles={relatedArticles}
       moreHref={moreHref}
       external={external}
