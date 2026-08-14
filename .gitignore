@@ -33,3 +33,6 @@ next-env.d.ts
 # ローカル実行時のフィード生成物（CIはBlobへ出力）
 /catalog-feed.tsv
 /catalog-feed-review.tsv
+
+# ローカルのエディタ/エージェント設定（devサーバ定義など）はコミットしない
+.claude/
