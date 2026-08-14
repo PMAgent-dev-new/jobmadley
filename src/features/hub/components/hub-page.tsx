@@ -66,7 +66,7 @@ interface HubPageProps {
     catName: string
     selfJobsHref: string
     /** 「もっと見る」の追加読み込み用（/api/external-jobs へ渡す絞り込み条件） */
-    query: { cat: string; pref?: string; muni?: string }
+    query: { cat?: string; feature?: string; pref?: string; muni?: string }
   }
 }
 

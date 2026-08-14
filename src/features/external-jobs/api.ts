@@ -136,11 +136,15 @@ function mapRow(r: Record<string, unknown>): ExternalJob {
   }
 }
 
+/**
+ * `ok:false` は「取得に失敗した」。在庫が本当に0件なのか一時障害なのかを
+ * 呼び出し側が区別できないと、障害が「在庫ゼロ」と読まれて 404 が1時間キャッシュされる。
+ */
 async function rawQuery(
   params: Record<string, string>,
   wantCount = false,
   view: string = VIEW,
-): Promise<{ rows: Record<string, unknown>[]; count: number }> {
+): Promise<{ rows: Record<string, unknown>[]; count: number; ok: boolean }> {
   const qs = new URLSearchParams(params).toString()
   const url = `${SUPABASE_URL}/rest/v1/${view}?${qs}`
   const headers: Record<string, string> = {
@@ -150,7 +154,7 @@ async function rawQuery(
   if (wantCount) headers.Prefer = "count=exact"
   try {
     const res = await fetch(url, { headers, next: { revalidate: REVALIDATE } })
-    if (!res.ok) return { rows: [], count: 0 }
+    if (!res.ok) return { rows: [], count: 0, ok: false }
     const data = (await res.json()) as Record<string, unknown>[]
     let count = data.length
     if (wantCount) {
@@ -159,19 +163,19 @@ async function rawQuery(
       const total = cr?.split("/")?.[1]
       if (total && total !== "*") count = Number(total)
     }
-    return { rows: data, count }
+    return { rows: data, count, ok: true }
   } catch {
     // 障害時は外部求人セクションを出さない（自社ページは無傷）。
-    return { rows: [], count: 0 }
+    return { rows: [], count: 0, ok: false }
   }
 }
 
 async function query(
   params: Record<string, string>,
   wantCount = false,
-): Promise<{ rows: ExternalJob[]; count: number }> {
-  const { rows, count } = await rawQuery(params, wantCount)
-  return { rows: rows.map(mapRow), count }
+): Promise<{ rows: ExternalJob[]; count: number; ok: boolean }> {
+  const { rows, count, ok } = await rawQuery(params, wantCount)
+  return { rows: rows.map(mapRow), count, ok }
 }
 
 /**
@@ -417,9 +421,9 @@ export const getExternalJobsByFeature = async (params: {
   match: string[]
   limit?: number
   offset?: number
-}): Promise<{ jobs: ExternalJob[]; count: number }> => {
-  if (params.match.length === 0) return { jobs: [], count: 0 }
-  const { rows, count } = await query(
+}): Promise<{ jobs: ExternalJob[]; count: number; ok: boolean }> => {
+  if (params.match.length === 0) return { jobs: [], count: 0, ok: true }
+  const { rows, count, ok } = await query(
     {
       select: SELECT_COLUMNS,
       or: featureFilter(params.match),
@@ -429,7 +433,7 @@ export const getExternalJobsByFeature = async (params: {
     },
     true,
   )
-  return { jobs: rows, count }
+  return { jobs: rows, count, ok }
 }
 
 /** 条件ハブの件数。title と本文で数字が食い違わないよう、表示と同じ条件で数える。 */

@@ -51,10 +51,13 @@ export default async function Page({ params }: Props) {
   const f = findFeature(feature)
   if (!f) notFound()
 
-  const { jobs, count } = await getExternalJobsByFeature({
+  const { jobs, count, ok } = await getExternalJobsByFeature({
     match: f.match,
     limit: EXTERNAL_PAGE_SIZE,
   })
+  // 取得失敗を「在庫ゼロ」と読むと 404 が最大1時間キャッシュされ、公開済みハブが消える。
+  // 投げれば ISR は直前の生成結果を配り続けるので、障害中もページは生きる（PR #86 の方針）。
+  if (!ok) throw new Error(`external jobs unavailable: feature=${f.slug}`)
   // 在庫が薄いページを出さない（職種ハブの外部求人しきい値と同じ考え方）
   if (count < 20) notFound()
 
@@ -81,7 +84,7 @@ export default async function Page({ params }: Props) {
       bodyHtml={f.body}
       summaryLabel={`${f.name}（全国）`}
       summary={`当サイトに掲載中の${f.name}求人は${count}件です。配送・宅配ドライバーとトラックドライバーの両方にまたがるため、職種で絞るとどちらかが抜け落ちます。ここでは働き方でまとめています。`}
-      stats={{ count, companyCount: 0, topTags: [] }}
+      stats={{ count, companyCount: 0, topTags: [], salarySampleSize: 0 }}
       totalCount={0}
       jobs={[]}
       faqs={[
@@ -105,7 +108,9 @@ export default async function Page({ params }: Props) {
         region: "全国",
         catName: f.name,
         selfJobsHref: "/search",
-        query: { cat: "delivery-driver" },
+        // cat を渡すと「もっと見る」が配送・宅配カテゴリ全体（5,619件）を継ぎ足し、
+        // ルート配送でない求人が混ざる一方でトラック側のルート配送に届かなくなる
+        query: { feature: f.slug },
       }}
       related={[
         {
