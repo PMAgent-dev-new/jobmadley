@@ -271,6 +271,8 @@ export const getExternalJobsForPrefecture = async (params: {
   limit?: number
   offset?: number
 }): Promise<{ jobs: ExternalJob[]; count: number }> => {
+  // 空文字だと prefecture=eq. で全県が返る。他のハブ用関数と同じくここで止める
+  if (!params.prefectureRegion) return { jobs: [], count: 0 }
   const cats = Object.keys(EXTERNAL_CATEGORY_TO_HUB)
   const inList = `(${cats.map((c) => `"${c}"`).join(",")})`
   const { rows, count } = await query(
@@ -337,8 +339,25 @@ export const externalHubKey = (prefectureRegion: string, hubCatSlug: string): st
 export type ExternalHubCounts = Record<string, number>
 
 const COUNT_PAGE = 1000
-/** 暴走防止の上限（現状の対象在庫は約1.8万件）。 */
-const COUNT_MAX_PAGES = 40
+/**
+ * 暴走防止の上限。対象8カテゴリの在庫は 2026-08-14 実測で 31,001 行（上限の 39%）。
+ * ⚠️ ここに達すると件数が静かに過少になるだけでなく、同じマトリクスを見る
+ * qualifiesByExternalJobs 経由でハブ生成とサイトマップからページが黙って落ちる。
+ * 週次ロードで在庫は増えるので、到達したら警告を出して気づけるようにしてある。
+ */
+const COUNT_MAX_PAGES = 80
+
+/** 上限に達したら黙って切り捨てず必ず記録する（気づけない過少集計が一番こわい）。 */
+const pageCount = (total: number): number => {
+  const needed = Math.ceil(total / COUNT_PAGE)
+  if (needed > COUNT_MAX_PAGES) {
+    console.warn(
+      `[external-jobs] 在庫 ${total} 件が取得上限 ${COUNT_MAX_PAGES * COUNT_PAGE} 件を超えました。` +
+        `件数が過少になり、ハブがサイトマップから落ちます。COUNT_MAX_PAGES を引き上げてください。`,
+    )
+  }
+  return Math.min(needed, COUNT_MAX_PAGES)
+}
 
 /**
  * 県×職種ごとの外部求人件数マトリクス。sitemap 掲載判定と関連リンクの出し分けに使う。
@@ -366,7 +385,7 @@ export const getExternalHubCounts = unstable_cache(
 
     const first = await page(0, true)
     if (first.rows.length === 0) return {}
-    const pages = Math.min(Math.ceil(first.count / COUNT_PAGE), COUNT_MAX_PAGES)
+    const pages = pageCount(first.count)
     const rest = await Promise.all(
       Array.from({ length: pages - 1 }, (_, i) => page((i + 1) * COUNT_PAGE)),
     )
@@ -465,7 +484,7 @@ export const getExternalMuniHubCounts = unstable_cache(
       )
     const first = await page(0, true)
     if (first.rows.length === 0) return {}
-    const pages = Math.min(Math.ceil(first.count / COUNT_PAGE), COUNT_MAX_PAGES)
+    const pages = pageCount(first.count)
     const rest = await Promise.all(
       Array.from({ length: pages - 1 }, (_, i) => page((i + 1) * COUNT_PAGE)),
     )

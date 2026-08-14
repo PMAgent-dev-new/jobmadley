@@ -7,6 +7,7 @@ import { getJobCategories } from "@/features/master/job-categories"
 import { getJobCountMatrix, type JobCountMatrix } from "@/features/jobs/api"
 import type { Prefecture, JobCategory } from "@/features/master/types"
 import type { Job } from "@/features/jobs/types"
+import { summarizeSalary } from "./salary"
 import hubContentsData from "@/features/hub/hub-contents.data.json"
 
 /** 県×職種ハブを生成する最小求人数（これ未満の組合せは薄いページになるため作らない） */
@@ -298,8 +299,6 @@ export const catContent: Record<
   },
 }
 
-const yen = (v: number) => `${Math.round(v / 10000)}万円`
-
 /** ハブ内求人リストから集計した独自の傾向データ（一次情報＝差別化とAIO引用の核） */
 export interface HubStats {
   count: number
@@ -314,20 +313,12 @@ export interface HubStats {
   topTags: string[]
 }
 
-/** 昇順配列のパーセンタイル（線形補間なし・最近傍）。 */
-const percentile = (sorted: number[], p: number): number =>
-  sorted[Math.min(sorted.length - 1, Math.max(0, Math.round((sorted.length - 1) * p)))]
-
 /**
- * 給与の中心帯を出すのに min〜max を使ってはいけない。
- * 歩合の上限を書いた求人が1件あるだけで「月給18万円〜110万円」になり（東京都ハブで実際に発生）、
- * 情報量がゼロになるどころか誇大に見える。四分位で中心帯を出し、母数が少なければ出さない。
+ * 会社ページのように「そのハブの求人がすべて同一企業のもの」の場合、母数1件でも
+ * それは集計値ではなく求人票そのものなので、外れ値を疑う理由がない。
+ * その場合だけ minSample:1 を渡して下限を外す。
  */
-const SALARY_MIN_SAMPLE = 10
-/** これ未満は中央値も出さない（1件の入替で数字が動くため） */
-const SALARY_MIN_MEDIAN = 5
-
-export const computeHubStats = (jobs: Job[]): HubStats => {
+export const computeHubStats = (jobs: Job[], opts: { minSample?: number } = {}): HubStats => {
   // 給与は「月給」の求人だけで集計する。時給・日給・年収の求人を混ぜると
   // 最小値が時給額（例: 1,500円）になり yen() で「月給0万円〜」と壊れた表示になり、
   // 年収求人が混ざれば上限が実態より跳ね上がるため。
@@ -340,18 +331,7 @@ export const computeHubStats = (jobs: Job[]): HubStats => {
   const mins = monthlyJobs
     .map((j) => j.salaryMin)
     .filter((n): n is number => typeof n === "number" && n > 0)
-    .sort((a, b) => a - b)
-  const salarySampleSize = mins.length
-  const salaryMedian = salarySampleSize > 0 ? percentile(mins, 0.5) : undefined
-  // 母数が10件に満たなくても、5件あれば中央値なら意味を持つ。情報を消すより中央値で残す。
-  // 下限額が横並びのハブでは p25==p75 で「月給23万円〜23万円」という縮退帯が出るので畳む。
-  const salaryText = (() => {
-    if (salarySampleSize < SALARY_MIN_MEDIAN) return undefined
-    if (salarySampleSize < SALARY_MIN_SAMPLE) return `月給${yen(salaryMedian!)}前後`
-    const lo = percentile(mins, 0.25)
-    const hi = percentile(mins, 0.75)
-    return lo === hi ? `月給${yen(lo)}前後` : `月給${yen(lo)}〜${yen(hi)}`
-  })()
+  const { salaryText, salaryMedian, salarySampleSize } = summarizeSalary(mins, opts.minSample)
 
   const empCount: Record<string, number> = {}
   for (const j of jobs) for (const e of j.employmentType ?? []) empCount[e] = (empCount[e] ?? 0) + 1
