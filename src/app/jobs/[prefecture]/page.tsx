@@ -2,6 +2,12 @@ import { notFound } from "next/navigation"
 import type { Metadata } from "next"
 import HubPage from "@/features/hub/components/hub-page"
 import { getJobsPaged, getJobsForStats } from "@/features/jobs/api"
+import {
+  getExternalJobsForPrefecture,
+  getExternalHubCounts,
+  externalPrefectureTotal,
+  EXTERNAL_PAGE_SIZE,
+} from "@/features/external-jobs/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
 import {
   HUB_MIN_JOBS,
@@ -36,7 +42,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { prefectures, matrix } = await getHubData()
   const pref = prefectures.find((p) => p.slug === prefecture)
   if (!pref) return { title: "求人が見つかりません", robots: { index: false, follow: false } }
-  const count = matrix.byPrefecture[pref.id] ?? 0
+  // 県ハブだけ自社求人しか数えておらず、東京都ハブ171件 < 東京都×タクシー265件 という
+  // 「部分が全体を超える」逆転が起きていた（PR #91 で職種ハブを合算にした際の漏れ）。
+  const selfCount = matrix.byPrefecture[pref.id] ?? 0
+  const count = selfCount + externalPrefectureTotal(await getExternalHubCounts(), pref.region)
   const base = hubUrl.prefecture(pref.slug!)
   const content = await getHubContent(base)
   return generateHubMetadata({
@@ -71,6 +80,22 @@ export default async function Page({ params }: Props) {
     ? await getJobsForStats({ prefectureId: pref.id })
     : jobs
   const stats = { ...computeHubStats(statsJobs), count: totalCount }
+
+  const { jobs: exJobs, count: exCount } = await getExternalJobsForPrefecture({
+    prefectureRegion: pref.region,
+    limit: EXTERNAL_PAGE_SIZE,
+  })
+  const external = exCount > 0
+    ? {
+        jobs: exJobs,
+        count: exCount,
+        region: pref.region,
+        catName: "ドライバー・整備士",
+        selfJobsHref: searchUrl({ prefectureId: pref.id }),
+        selfJobsCount: totalCount,
+        query: { cat: "", pref: pref.region },
+      }
+    : undefined
   const jobLinks = statsJobs.slice(0, 200).map((j) => ({ id: j.id, name: j.jobName ?? j.title ?? "求人" }))
   const content = await getHubContent(base)
 
@@ -89,6 +114,7 @@ export default async function Page({ params }: Props) {
       totalCount={totalCount}
       jobs={jobs}
       jobLinks={jobLinks}
+      external={external}
       faqs={buildHubFaqs({ region: pref.region, stats })}
       moreHref={searchUrl({ prefectureId: pref.id })}
       related={[{ title: `${pref.region}の職種から探す`, links: catsInKen }]}

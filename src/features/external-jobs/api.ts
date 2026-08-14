@@ -265,6 +265,40 @@ export const getExternalJobsForCategory = async (params: {
   return { jobs: rows, count }
 }
 
+/** 県ハブ（例 /jobs/tokyo）向け。その県の対応職種すべてをまとめて引く。 */
+export const getExternalJobsForPrefecture = async (params: {
+  prefectureRegion: string
+  limit?: number
+  offset?: number
+}): Promise<{ jobs: ExternalJob[]; count: number }> => {
+  const cats = Object.keys(EXTERNAL_CATEGORY_TO_HUB)
+  const inList = `(${cats.map((c) => `"${c}"`).join(",")})`
+  const { rows, count } = await query(
+    {
+      select: SELECT_COLUMNS,
+      prefecture: `eq.${params.prefectureRegion}`,
+      job_category: `in.${inList}`,
+      order: ORDER_HUB,
+      limit: String(params.limit ?? EXTERNAL_PAGE_SIZE),
+      ...offsetParam(params.offset),
+    },
+    true,
+  )
+  return { jobs: rows, count }
+}
+
+/**
+ * 県ハブの外部求人件数。県×職種マトリクスを県で畳む。
+ * ⚠️ 職種ハブ（getExternalCategoryCount）では実カウントを使っている。あちらは
+ * prefecture が空の行を落とすと title と本文が食い違うため。県ハブは prefecture で
+ * 絞る以上、空の行はそもそも対象外なので畳んで問題ない。
+ */
+export const externalPrefectureTotal = (counts: ExternalHubCounts, prefectureRegion: string): number =>
+  Object.entries(counts).reduce(
+    (n, [key, v]) => (key.startsWith(`${prefectureRegion}|`) ? n + v : n),
+    0,
+  )
+
 /** 職種グループハブ（例 /jobs/group/driver）向け。複数の職種slugをまとめて引く。 */
 export const getExternalJobsForCategories = async (params: {
   hubCatSlugs: string[]

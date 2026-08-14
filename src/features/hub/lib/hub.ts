@@ -303,14 +303,30 @@ const yen = (v: number) => `${Math.round(v / 10000)}万円`
 /** ハブ内求人リストから集計した独自の傾向データ（一次情報＝差別化とAIO引用の核） */
 export interface HubStats {
   count: number
+  /** 月給の中心帯（第1四分位〜第3四分位）。母数が少ないハブでは undefined */
   salaryText?: string
+  /** 月給の中央値（円）。description の生成に使う */
+  salaryMedian?: number
+  /** 給与集計に使えた月給求人の件数（表示の妥当性判断用） */
+  salarySampleSize: number
   employmentText?: string
   companyCount: number
   topTags: string[]
 }
 
+/** 昇順配列のパーセンタイル（線形補間なし・最近傍）。 */
+const percentile = (sorted: number[], p: number): number =>
+  sorted[Math.min(sorted.length - 1, Math.max(0, Math.round((sorted.length - 1) * p)))]
+
+/**
+ * 給与の中心帯を出すのに min〜max を使ってはいけない。
+ * 歩合の上限を書いた求人が1件あるだけで「月給18万円〜110万円」になり（東京都ハブで実際に発生）、
+ * 情報量がゼロになるどころか誇大に見える。四分位で中心帯を出し、母数が少なければ出さない。
+ */
+const SALARY_MIN_SAMPLE = 10
+
 export const computeHubStats = (jobs: Job[]): HubStats => {
-  // 給与レンジは「月給」の求人だけで集計する。時給・日給・年収の求人を混ぜると
+  // 給与は「月給」の求人だけで集計する。時給・日給・年収の求人を混ぜると
   // 最小値が時給額（例: 1,500円）になり yen() で「月給0万円〜」と壊れた表示になり、
   // 年収求人が混ざれば上限が実態より跳ね上がるため。
   // wageType 未設定は月給扱い（microCMS の既定運用。従来の集計対象と同じ）。
@@ -318,9 +334,17 @@ export const computeHubStats = (jobs: Job[]): HubStats => {
     const unit = j.wageType?.[0]?.trim()
     return !unit || unit === "月給"
   })
-  const mins = monthlyJobs.map((j) => j.salaryMin).filter((n): n is number => typeof n === "number" && n > 0)
-  const maxs = monthlyJobs.map((j) => j.salaryMax ?? j.salaryMin).filter((n): n is number => typeof n === "number" && n > 0)
-  const salaryText = mins.length > 0 ? `月給${yen(Math.min(...mins))}〜${yen(Math.max(...maxs))}` : undefined
+  // 下限額を代表値に使う（求人票の「月給◯万円〜」の◯）。上限は歩合の理論値が入りやすく代表性が無い。
+  const mins = monthlyJobs
+    .map((j) => j.salaryMin)
+    .filter((n): n is number => typeof n === "number" && n > 0)
+    .sort((a, b) => a - b)
+  const salarySampleSize = mins.length
+  const salaryMedian = salarySampleSize > 0 ? percentile(mins, 0.5) : undefined
+  const salaryText =
+    salarySampleSize >= SALARY_MIN_SAMPLE
+      ? `月給${yen(percentile(mins, 0.25))}〜${yen(percentile(mins, 0.75))}`
+      : undefined
 
   const empCount: Record<string, number> = {}
   for (const j of jobs) for (const e of j.employmentType ?? []) empCount[e] = (empCount[e] ?? 0) + 1
@@ -330,12 +354,14 @@ export const computeHubStats = (jobs: Job[]): HubStats => {
     .slice(0, 4)
     .join("・") || undefined
 
+
   const companies = new Set(jobs.map((j) => j.companyName).filter(Boolean))
   const tagCount: Record<string, number> = {}
   for (const j of jobs) for (const t of j.tags ?? []) if (t.name) tagCount[t.name] = (tagCount[t.name] ?? 0) + 1
   const topTags = Object.entries(tagCount).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([n]) => n)
 
-  return { count: jobs.length, salaryText, employmentText, companyCount: companies.size, topTags }
+  return { count: jobs.length, salaryText, salaryMedian, salarySampleSize,
+           employmentText, companyCount: companies.size, topTags }
 }
 
 /** 地域×職種の傾向を結論ファーストで1〜2文に要約（サンプル=表示中の求人ベース） */

@@ -16,6 +16,7 @@ import {
   getExternalJobsForCategory,
   getExternalJobsForHub,
   getExternalJobsForMuniHub,
+  getExternalJobsForPrefecture,
   hasExternalJobsForCategory,
 } from "@/features/external-jobs/api"
 
@@ -31,8 +32,11 @@ export async function GET(req: Request) {
   const pref = sp.get("pref") ?? ""
   const muni = sp.get("muni") ?? ""
 
+  // 県ハブ（/jobs/tokyo）は職種横断なので cat を持たない。pref があれば県モードで通す。
+  // cat も pref も無い場合だけ弾く（全件返す入口を作らないため）。
+  const prefectureMode = !cat && !!pref
   // 職種は既知 slug のみ（未知なら api 側も空を返すが、ここで弾いて無駄打ちを防ぐ）
-  if (!hasExternalJobsForCategory(cat)) return bad("unknown cat")
+  if (!prefectureMode && !hasExternalJobsForCategory(cat)) return bad("unknown cat")
   if (pref && !PLACE_RE.test(pref)) return bad("bad pref")
   if (muni && !PLACE_RE.test(muni)) return bad("bad muni")
 
@@ -40,7 +44,9 @@ export async function GET(req: Request) {
   const offset = Math.min(Math.max(Number(sp.get("offset") ?? 0) | 0, 0), 100_000)
 
   const args = { hubCatSlug: cat, limit: EXTERNAL_PAGE_SIZE, offset }
-  const { jobs, count } = muni
+  const { jobs, count } = prefectureMode
+    ? await getExternalJobsForPrefecture({ prefectureRegion: pref, limit: EXTERNAL_PAGE_SIZE, offset })
+    : muni
     ? await getExternalJobsForMuniHub({ ...args, prefectureRegion: pref, municipalityName: muni })
     : pref
       ? await getExternalJobsForHub({ ...args, prefectureRegion: pref })
