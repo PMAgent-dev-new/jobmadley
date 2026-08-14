@@ -405,6 +405,48 @@ export const getExternalHubCounts = unstable_cache(
 )
 
 /**
+ * 条件（働き方）ハブ向け。title か description に該当語を含む求人を引く。
+ *
+ * ルート配送のような働き方は job_category をまたぐ（配送・宅配3,260件＋トラック472件）ため、
+ * 職種での絞り込みでは受け皿にならない。PostgREST の or フィルタで本文検索する。
+ */
+const featureFilter = (match: string[]): string =>
+  `(${match.flatMap((m) => [`title.ilike.*${m}*`, `description.ilike.*${m}*`]).join(",")})`
+
+export const getExternalJobsByFeature = async (params: {
+  match: string[]
+  limit?: number
+  offset?: number
+}): Promise<{ jobs: ExternalJob[]; count: number }> => {
+  if (params.match.length === 0) return { jobs: [], count: 0 }
+  const { rows, count } = await query(
+    {
+      select: SELECT_COLUMNS,
+      or: featureFilter(params.match),
+      order: ORDER_HUB,
+      limit: String(params.limit ?? EXTERNAL_PAGE_SIZE),
+      ...offsetParam(params.offset),
+    },
+    true,
+  )
+  return { jobs: rows, count }
+}
+
+/** 条件ハブの件数。title と本文で数字が食い違わないよう、表示と同じ条件で数える。 */
+export const getExternalFeatureCount = unstable_cache(
+  async (match: string[]): Promise<number> => {
+    if (match.length === 0) return 0
+    const { count } = await query(
+      { select: "source_id", or: featureFilter(match), limit: "1" },
+      true,
+    )
+    return count
+  },
+  ["external-feature-count"],
+  { revalidate: REVALIDATE },
+)
+
+/**
  * 職種ハブ（全国）の外部求人件数。
  *
  * ⚠️ 県×職種マトリクス（getExternalHubCounts）を畳んで代用してはいけない。

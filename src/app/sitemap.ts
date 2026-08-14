@@ -7,6 +7,7 @@ import {
   HUB_MIN_JOBS,
   HUB_GROUPS,
   hubUrl,
+  HUB_FEATURES,
   prefCatCount,
   withSlug,
   getHubData,
@@ -68,6 +69,11 @@ const getHubRoutes = async (): Promise<MetadataRoute.Sitemap> => {
   }
   for (const g of HUB_GROUPS) {
     routes.push({ url: `${SITE_URL}${hubUrl.group(g.slug)}`, changeFrequency: "daily", priority: 0.6 })
+  }
+  // 条件（働き方）ハブ。在庫が20件未満なら page 側で notFound になるため、
+  // sitemap 掲載も HUB_FEATURES に登録したものだけに限る。
+  for (const f of HUB_FEATURES) {
+    routes.push({ url: `${SITE_URL}${hubUrl.feature(f.slug)}`, changeFrequency: "daily", priority: 0.6 })
   }
   return routes
 }
