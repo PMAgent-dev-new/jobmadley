@@ -5,6 +5,10 @@ const read = (name: string): string | undefined => {
   return value && value.length > 0 ? value : undefined
 }
 
+/** Vercel の本番デプロイか。preview / development / ローカルは false。 */
+const isProduction = (): boolean =>
+  read("VERCEL_ENV") === "production" || (!read("VERCEL_ENV") && read("NODE_ENV") === "production")
+
 const requireEnv = (name: string): string => {
   const value = read(name)
   if (!value) {
@@ -116,8 +120,18 @@ export const gmailEnv = {
 export const smsEnv = {
   /** CPaaS NOW APIトークン（未設定なら送信しない） */
   cpaasToken: () => read("CPAASNOW_API_TOKEN"),
-  /** CPaaS NOW エンドポイント（未設定ならサンドボックス＝実SMSは飛ばない） */
-  cpaasBaseUrl: () => read("CPAASNOW_BASE_URL") ?? "https://sandbox.cpaasnow.com",
+  /**
+   * CPaaS NOW エンドポイント。
+   *
+   * ⚠️ 本番で未設定のときサンドボックスへ落とさない。sandbox は配信しない別環境
+   * （ベンダー公式 OpenAPI に「開発環境から実際にSMSは配信できません」と明記）なのに
+   * 202 + delivery_order_id を返すため、cpaas.ts は成功と判定し eeasy にも
+   * 「送信済み」として記録される。つまり**1通も届いていないのにKPIは正常に見える**。
+   * 誰かが値を消す・typoするだけでこの状態になるので、本番では undefined を返して
+   * 送信自体をスキップさせ、Larkのエラー通知で気づけるようにする。
+   */
+  cpaasBaseUrl: (): string | undefined =>
+    read("CPAASNOW_BASE_URL") ?? (isProduction() ? undefined : "https://sandbox.cpaasnow.com"),
   /** 予約URLの基盤（?ref で送信→予約を突合） */
   bookingBaseUrl: () => read("SMS_BOOKING_BASE_URL") ?? "https://leomeet.pmagent.jp",
   /** eeasy 本体（送信ログ /api/sms/log の宛先） */
