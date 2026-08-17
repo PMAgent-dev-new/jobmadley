@@ -2,10 +2,23 @@ import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import HubPage from "@/features/hub/components/hub-page"
 import { computeHubStats, HUB_LIST_LIMIT, hubUrl, type HubFaq } from "@/features/hub/lib/hub"
-import { FEATURED_COMPANIES, findFeaturedCompany } from "@/features/companies/data"
+import { COMPANY_KEEP_JOBS, FEATURED_COMPANIES, findFeaturedCompany } from "@/features/companies/data"
 import { getFeaturedCompanyJobs } from "@/features/companies/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
 
+/**
+ * 法人単位の企業ページ。生成対象は companies.data.json（人がレビューして足す表）で固定し、
+ * 在庫の増減では増えも減りもしない。
+ *
+ * 生成と維持で閾値を分ける（ヒステリシス）:
+ * - 新規に行を足す下限 … COMPANY_MIN_JOBS（人の判断。実行時には効かない）
+ * - 公開済みページを index し続ける下限 … COMPANY_KEEP_JOBS
+ * 在庫が下限を割っても 404 にはしない。インデックス済みURLを月次の在庫変動で失うほうが損で、
+ * 畳むと決めたら RETIRED_COMPANIES へ移して301で送る（next.config.mjs）。
+ *
+ * ⚠️ index/noindex の判定は generateMetadata と本体で必ず同じ条件にすること。
+ * PR #86 の初版は generateMetadata を直し忘れて「200を返すのに noindex」を出した。
+ */
 export const revalidate = 3600
 export const dynamicParams = false
 
@@ -16,6 +29,9 @@ interface Props {
 export function generateStaticParams() {
   return FEATURED_COMPANIES.map((company) => ({ company: company.slug }))
 }
+
+/** 掲載中の求人がこの件数以上あれば index する。generateMetadata と本体で共有する唯一の判定。 */
+const shouldIndex = (jobCount: number) => jobCount >= COMPANY_KEEP_JOBS
 
 const countNames = (values: Array<{ name?: string; slug?: string } | undefined>) => {
   const counts = new Map<string, { name: string; slug?: string; count: number }>()
@@ -34,6 +50,38 @@ const countNames = (values: Array<{ name?: string; slug?: string } | undefined>)
 const joinTopNames = (items: Array<{ name: string }>, fallback: string) =>
   items.length > 0 ? items.slice(0, 5).map((item) => item.name).join("・") : fallback
 
+/**
+ * 職種別の「応募前に見るところ」。掲載中の職種にだけ出す。
+ * 以前はタクシードライバー向けの段落を全ページに固定で出していたが、法人単位に作り直した結果
+ * 整備士しか募集していない会社（レッドバロン、オートアールズ等）が多数を占めるようになり、
+ * 本文と掲載求人が噛み合わなくなるため。
+ */
+const CATEGORY_ADVICE: Record<string, string> = {
+  タクシードライバー:
+    "普通自動車第二種免許の取得支援、研修中の給与、勤務シフト（隔日勤務・日勤・夜勤）、配車アプリや無線の利用環境などを比較すると、入社後の働き方を具体的に判断しやすくなります。",
+  ハイヤードライバー:
+    "配車先の業種、拘束時間と待機の扱い、接遇研修の内容、第二種免許の要否を確認しましょう。同じ会社でもタクシー乗務とは勤務形態が大きく異なります。",
+  自動車整備士:
+    "扱う車種（国産・輸入車・商用車）、自動車検査員や整備士資格の要否と資格手当、指定工場か認証工場か、繁忙期の残業時間を比較しましょう。工場の設備と扱う車種で身につく技術が変わります。",
+  バイク整備士:
+    "扱うメーカーと車種、二輪自動車整備士資格の要否と手当、店舗での接客業務の比重、未経験者向け研修の期間を確認しましょう。",
+  バスドライバー:
+    "大型自動車第二種免許の取得支援、路線・貸切・送迎のどれを担当するか、拘束時間と泊まり勤務の有無を確認しましょう。",
+  運行管理者:
+    "運行管理者資格の要否と取得支援、担当する営業所の車両数、点呼のシフト（早朝・深夜の有無）、乗務との兼務があるかを確認しましょう。",
+  営業:
+    "扱う商材（車両・部品・サービス）、既存顧客中心か新規開拓か、インセンティブの比率、社用車と担当エリアの広さを比較しましょう。",
+}
+
+/** 掲載件数の多い職種から最大2つぶんのアドバイスをHTMLで返す。 */
+const buildCategoryAdvice = (categories: Array<{ name: string }>): string =>
+  categories
+    .map((category) => ({ name: category.name, advice: CATEGORY_ADVICE[category.name] }))
+    .filter((item): item is { name: string; advice: string } => Boolean(item.advice))
+    .slice(0, 2)
+    .map((item) => `<h3>${item.name}求人を検討する場合</h3>\n    <p>${item.advice}</p>`)
+    .join("\n    ")
+
 const buildFaqs = (params: {
   name: string
   count: number
@@ -48,7 +96,8 @@ const buildFaqs = (params: {
   const faqs: HubFaq[] = [
     {
       question: `${name}の求人は何件ありますか？`,
-      answer: `RIDE JOB（ライドジョブ）では、${name}に関連する求人を${count}件掲載しています。募集状況は更新されるため、各求人の掲載内容と更新日をご確認ください。`,
+      // 「関連する求人」ではなく「その法人の求人」。ページ自体が法人単位になったので言い切る。
+      answer: `RIDE JOB（ライドジョブ）では、${name}の求人を${count}件掲載しています。募集状況は更新されるため、各求人の掲載内容と更新日をご確認ください。`,
     },
     {
       question: `${name}ではどの地域の求人を募集していますか？`,
@@ -91,8 +140,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     canonicalPath: `/companies/${company.slug}`,
   })
 
-  // 求人0件のページを検索結果へ出さず、ロゴからの導線と将来の求人追加には備える。
-  return jobs.length > 0 ? metadata : { ...metadata, robots: { index: false, follow: true } }
+  // 中身の薄いページを検索結果へ出さない。導線と将来の求人追加のため follow は残す。
+  return shouldIndex(jobs.length) ? metadata : { ...metadata, robots: { index: false, follow: true } }
 }
 
 export default async function CompanyPage({ params }: Props) {
@@ -133,9 +182,8 @@ export default async function CompanyPage({ params }: Props) {
     <h2>${company.name}の求人について</h2>
     <p>${company.overview}</p>
     <h2>応募前に比較したいポイント</h2>
-    <p>同じ企業・ブランドの求人でも、営業所や職種によって勤務時間、給与体系、研修内容、必要な免許・資格は異なります。求人票では、配属先までの通勤方法、歩合・手当・保証給を含む給与条件、休日、研修期間、資格取得支援の対象範囲を確認しましょう。</p>
-    <h3>タクシードライバー求人を検討する場合</h3>
-    <p>普通自動車第二種免許の取得支援、研修中の給与、勤務シフト、配車アプリや無線の利用環境などを比較すると、入社後の働き方を具体的に判断しやすくなります。</p>
+    <p>同じ会社の求人でも、営業所・店舗や職種によって勤務時間、給与体系、研修内容、必要な免許・資格は異なります。求人票では、配属先までの通勤方法、歩合・手当・保証給を含む給与条件、休日、研修期間、資格取得支援の対象範囲を確認しましょう。</p>
+    ${buildCategoryAdvice(categories)}
   `
 
   return (
@@ -148,10 +196,15 @@ export default async function CompanyPage({ params }: Props) {
       h1={`${company.name}の求人・転職`}
       lead={
         allJobs.length > 0
-          ? `${company.name}に関連する求人を${allJobs.length}件掲載しています。${regionText}の求人を、職種・給与・勤務条件から比較できます。`
+          ? `${company.name}の求人を${allJobs.length}件掲載しています。${regionText}の求人を、職種・給与・勤務条件から比較できます。`
           : `${company.name}の求人ページです。現在は掲載中の求人がありません。募集が追加されると、このページで勤務地や採用条件を比較できます。`
       }
-      heroImage={{ src: company.logoUrl, alt: `${company.name}のロゴ` }}
+      // ロゴは既に持っている社のみ。33社ぶんの他社ロゴを新規に集める運用と商標リスクを避け、
+      // 無い場合は社名タイポグラフィ（heroLabel）にフォールバックする。
+      heroImage={company.logoUrl ? { src: company.logoUrl, alt: `${company.name}のロゴ` } : undefined}
+      heroLabel={company.logoUrl ? undefined : company.name}
+      heroEyebrow="企業から求人を探す"
+      singleCompany
       summaryLabel={company.name}
       summary={`${summaryParts.join("、")}。掲載内容は求人ごとに更新されます。`}
       stats={stats}
@@ -159,7 +212,7 @@ export default async function CompanyPage({ params }: Props) {
       jobs={jobs}
       bodyHtml={bodyHtml}
       faqs={faq}
-      moreHref={allJobs.length > HUB_LIST_LIMIT ? `/search?q=${encodeURIComponent(company.matchTerms[0])}` : undefined}
+      moreHref={allJobs.length > HUB_LIST_LIMIT ? `/search?q=${encodeURIComponent(company.aliases[0])}` : undefined}
       jobLinks={allJobs.slice(0, 200).map((job) => ({ id: job.id, name: job.jobName ?? job.title }))}
       related={[
         {

@@ -88,6 +88,21 @@
   object-fit: contain;
 }
 
+/* ロゴを持たない企業。社名を折り返して枠内に収める（長い社名でカードの高さを崩さない） */
+.logoFallback {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  padding: 0 4px;
+  color: #0a2c75;
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1.35;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
 .companyName {
   font-size: 14px;
   font-weight: 800;
@@ -104,5 +119,6 @@
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .card { min-height: 132px; padding: 14px 10px 12px; }
   .logoWrap { min-height: 64px; }
+  .logoFallback { font-size: 13px; }
   .companyName { font-size: 12px; }
 }

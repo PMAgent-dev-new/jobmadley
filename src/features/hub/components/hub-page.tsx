@@ -58,6 +58,12 @@ interface HubPageProps {
   jobLinks?: Array<{ id: string; name: string }>
   /** 企業ハブなどでH1の横に表示する識別画像。通常ハブでは省略。 */
   heroImage?: { src: string; alt: string }
+  /** heroImage が無いときの代替。社名をそのままタイポグラフィで見せる（ロゴを持たない企業ページ用）。 */
+  heroLabel?: string
+  /** ヒーロー上の小見出し。heroImage / heroLabel のどちらかがあるときだけ表示する。 */
+  heroEyebrow?: string
+  /** 掲載求人がすべて同一法人（企業ページ）。件数まわりの単位表記を切り替える。 */
+  singleCompany?: boolean
   /** ハローワーク転載求人（自社求人とは別枠・出典明記で表示。対応職種のみ） */
   external?: {
     jobs: ExternalJob[]
@@ -89,8 +95,23 @@ export default function HubPage({
   relatedArticles = [],
   jobLinks = [],
   heroImage,
+  heroLabel,
+  heroEyebrow,
+  singleCompany = false,
   external,
 }: HubPageProps) {
+  const hasHero = Boolean(heroImage || heroLabel)
+  // companyCount は companyName のユニーク数。地域・職種ハブでは「掲載企業◯社」で正しい。
+  //
+  // ⚠️ 企業ページ（singleCompany）では出さない。全件が同じ会社なので意味としては
+  // 「営業所・店舗の数」になるが、companyName は自由記述で表記ゆれがあり正しく数えられない。
+  // 実測: 京浜交通は「京浜交通株式会社 弁天橋営業所」「京浜交通 株式会社 弁天橋営業所」
+  // 「京浜交通グループ　京浜交通株式会社 弁天橋営業所」が別物として3回数えられ、実質3拠点が
+  // 7拠点と出ていた。日興自動車に至っては「運行管理者」「事故交渉人」という職種名つきの
+  // 同一社名が拠点として数えられ、実質1拠点が4拠点になっていた（正規化でも解けない）。
+  // 誤った件数を index されるページに出すのは、このPRが解こうとしている問題そのもの。
+  // 拠点数を確実に出せる根拠（構造化された営業所マスタ）ができるまでは非表示にする。
+  const showCompanyCount = !singleCompany && stats.companyCount > 0
   const breadcrumbLd = generateBreadcrumbStructuredData(breadcrumb)
   // ItemList はこのページに実際に並ぶ求人（自社＋外部）を列挙する。
   // 自社求人0件・外部求人のみのハブ（例: 青森県×トラックドライバー）で
@@ -132,8 +153,8 @@ export default function HubPage({
           </ol>
         </nav>
 
-        <div className={heroImage ? "flex flex-col gap-5 sm:flex-row sm:items-center" : undefined}>
-          {heroImage && (
+        <div className={hasHero ? "flex flex-col gap-5 sm:flex-row sm:items-center" : undefined}>
+          {heroImage ? (
             <div className="flex h-24 w-full shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-white p-4 sm:w-64">
               <div className="relative h-16 w-full">
                 <Image
@@ -146,9 +167,23 @@ export default function HubPage({
                 />
               </div>
             </div>
-          )}
+          ) : heroLabel ? (
+            // ロゴを持たない企業でも枠のサイズを揃え、社名を長さに応じて縮めて収める
+            <div
+              aria-hidden="true"
+              className="flex h-24 w-full shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 px-4 sm:w-64"
+            >
+              <span
+                className={`text-center font-bold leading-snug text-gray-800 ${
+                  heroLabel.length > 14 ? "text-base" : "text-xl"
+                }`}
+              >
+                {heroLabel}
+              </span>
+            </div>
+          ) : null}
           <div>
-            {heroImage && <p className="mb-1 text-sm font-semibold text-primary">企業から求人を探す</p>}
+            {hasHero && heroEyebrow && <p className="mb-1 text-sm font-semibold text-primary">{heroEyebrow}</p>}
             <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">{h1}</h1>
             <p className="mt-3 text-gray-600 leading-relaxed">{lead}</p>
           </div>
@@ -174,7 +209,7 @@ export default function HubPage({
                 <dd className="text-lg font-bold text-gray-900">{stats.salaryText}</dd>
               </div>
             )}
-            {stats.companyCount > 0 && (
+            {showCompanyCount && (
               <div className="rounded-lg bg-gray-50 p-3">
                 <dt className="text-xs text-gray-500">掲載企業</dt>
                 <dd className="text-lg font-bold text-gray-900">{stats.companyCount}社</dd>
