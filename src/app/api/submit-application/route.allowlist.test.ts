@@ -29,6 +29,7 @@ const ALLOWED_HOSTS = new Set([
   "sandbox.cpaasnow.com", // CPaaS NOW（応募者SMS。CPAASNOW_BASE_URL 未設定時の既定）
   "leomeet.pmagent.jp", // eeasy /api/sms/log（SMS送信ログ。EEASY_BASE_URL 既定）
   "graph.facebook.com", // Meta Conversions API（Lead）
+  "cpaasnow.com", // CPaaS NOW 本番ホスト（CPAASNOW_BASE_URL が本番で指すべき先）
   "urvkgyohtqfxmymaivth.supabase.co", // 掲載求人(ハローワーク転載)の社名解決。SUPABASE_URL 既定
 ])
 

@@ -25,7 +25,25 @@ export const sendShortMessage = async (
     return { ok: false, status: 0, skipped: true, message: "not_configured" }
   }
 
-  const base = smsEnv.cpaasBaseUrl().replace(/\/+$/, "")
+  // 本番で CPAASNOW_BASE_URL が未設定なら undefined が返る。黙ってサンドボックスへ
+  // 流すと「届いていないのに送信済み」になるので、送らずに気づける形で落とす。
+  const baseUrl = smsEnv.cpaasBaseUrl()
+  if (!baseUrl) {
+    console.error(
+      `[sms:${context}] CPAASNOW_BASE_URL が本番で未設定です。実SMSを飛ばさないため送信を中止しました。` +
+        `Vercel の環境変数に https://cpaasnow.com を設定してください。`,
+    )
+    return { ok: false, status: 0, skipped: true, message: "base_url_not_configured" }
+  }
+  const base = baseUrl.replace(/\/+$/, "")
+  // 事故時に「どこへ送ったか」を切り分けられるよう、解決後のホストを必ず残す。
+  const host = (() => {
+    try {
+      return new URL(base).hostname
+    } catch {
+      return base
+    }
+  })()
   const payload: Record<string, unknown> = {
     to: args.to,
     text: args.text,
@@ -49,12 +67,14 @@ export const sendShortMessage = async (
     }
 
     if (res.status !== 202 || !body?.delivery_order_id) {
-      console.error(`[sms:${context}] cpaas send failed`, { status: res.status, body: text.slice(0, 300) })
+      console.error(`[sms:${context}] cpaas send failed`, { host, status: res.status, body: text.slice(0, 300) })
       return { ok: false, status: res.status, message: text.slice(0, 300) }
     }
+    // sandbox でも 202 が返るため、成功ログにも宛先ホストを残す（KPIとの突合に要る）
+    console.log(`[sms:${context}] cpaas accepted`, { host, deliveryOrderId: body.delivery_order_id })
     return { ok: true, status: res.status, deliveryOrderId: body.delivery_order_id, acceptedAt: body.accepted_at }
   } catch (error) {
-    console.error(`[sms:${context}] cpaas send exception`, error)
+    console.error(`[sms:${context}] cpaas send exception`, { host, error })
     return { ok: false, status: 0, message: error instanceof Error ? error.message : String(error) }
   }
 }
