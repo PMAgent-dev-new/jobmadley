@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { notFound } from "next/navigation"
 import HubPage from "@/features/hub/components/hub-page"
 import { computeHubStats, HUB_LIST_LIMIT, hubUrl, type HubFaq } from "@/features/hub/lib/hub"
+import { buildInventoryBreakdown } from "@/features/hub/lib/inventory"
 import { COMPANY_KEEP_JOBS, FEATURED_COMPANIES, findFeaturedCompany } from "@/features/companies/data"
 import { getFeaturedCompanyJobs } from "@/features/companies/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
@@ -154,6 +155,8 @@ export default async function CompanyPage({ params }: Props) {
   // 会社ページの求人はすべて同一企業のものなので、母数1件でも「その企業の提示額」であって
   // 集計の外れ値ではない。地域ハブ用の下限（5件）をここに当てると純粋な情報損失になる。
   const stats = computeHubStats(allJobs, { minSample: 1 })
+  // 掲載中求人そのものから作る内訳（給与の分布・勤務条件別の件数）。競合が持てない一次情報。
+  const inventory = buildInventoryBreakdown(allJobs, company.name)
   const regions = countNames(allJobs.map((job) => job.prefecture && ({ name: job.prefecture.region, slug: job.prefecture.slug })))
   const categories = countNames(allJobs.map((job) => job.jobCategory && ({ name: job.jobCategory.name, slug: job.jobCategory.slug })))
   const regionText = joinTopNames(regions, "全国")
@@ -208,6 +211,7 @@ export default async function CompanyPage({ params }: Props) {
       summaryLabel={company.name}
       summary={`${summaryParts.join("、")}。掲載内容は求人ごとに更新されます。`}
       stats={stats}
+      inventory={inventory}
       totalCount={allJobs.length}
       jobs={jobs}
       bodyHtml={bodyHtml}
