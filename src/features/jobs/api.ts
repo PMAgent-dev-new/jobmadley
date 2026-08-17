@@ -154,30 +154,40 @@ export const getJobsByCategoryIds = async (params: {
 }
 
 /**
- * 企業名の部分一致語を OR で結び、企業・ブランド別ハブに掲載する求人を全件取得する。
- * q（全文検索）では本文中の社名にも一致して別企業が混ざるため、companyName フィルターを使う。
+ * 企業ページの振り分け用に、求人を全件（表示に必要なフィールドだけ）取得する。
+ *
+ * 法人判定を companyName の前方一致＋境界チェックで行うようにしたが、microCMS に startsWith は無い。
+ * そこで「全件を1回取ってアプリ側で振り分ける」形に変えた。企業ページ×個別クエリだった頃より
+ * コール数はむしろ減る（ページ数に比例していたものが定数になる）。
  */
-export const getJobsByCompanyTerms = async (terms: string[]): Promise<Job[]> => {
-  const normalizedTerms = [...new Set(terms.map((term) => term.trim()).filter(Boolean))]
-  if (normalizedTerms.length === 0) return []
-
-  const filters = normalizedTerms.map((term) => `companyName[contains]${term}`).join("[or]")
+export const getAllJobsForCompanyPages = async (): Promise<Job[]> => {
+  // ⚠️ 参照フィールドは必ず使う子フィールドまで指定する。`tags` や `prefecture` を丸ごと取ると
+  // microCMS が各参照の全項目（createdAt/updatedAt/revisedAt…）まで返し、全件で2MBを超える。
+  // unstable_cache は2MB超の値を保存できず「毎リクエスト全件を取り直す」状態に静かに落ちる。
+  const fields = [
+    "id", "title", "jobName", "companyName", "hideCompanyName",
+    "imageUrl", "images.url",
+    // wageType は computeHubStats の給与レンジ集計（月給求人のみを対象にする）に必要
+    "salaryMin", "salaryMax", "wageType", "employmentType",
+    "createdAt", "publishedAt", "updatedAt",
+    "prefecture.id", "prefecture.region", "prefecture.slug",
+    "municipality.name",
+    "jobCategory.id", "jobCategory.name", "jobCategory.slug",
+    "tags.id", "tags.name",
+  ].join(",")
   const jobs: Job[] = []
   const limit = 100
   let offset = 0
-
   while (true) {
     const data = await fetchList<Job>({
       endpoint: "jobs",
-      queries: { limit, offset, depth: 1, orders: "-publishedAt", filters },
-      context: "getJobsByCompanyTerms",
+      queries: { limit, offset, depth: 1, orders: "-publishedAt", fields },
+      context: "getAllJobsForCompanyPages",
     })
-    // 企業名を非公開にした求人は企業ハブへ出さない。
-    jobs.push(...data.contents.filter((job) => !job.hideCompanyName))
+    jobs.push(...data.contents)
     offset += data.limit
     if (offset >= data.totalCount) break
   }
-
   return jobs
 }
 

@@ -13,7 +13,7 @@ import {
   getHubData,
   getMunicipalityContentEntries,
 } from "@/features/hub/lib/hub"
-import { FEATURED_COMPANIES, matchesFeaturedCompany } from "@/features/companies/data"
+import { COMPANY_KEEP_JOBS, FEATURED_COMPANIES, companySlugForJob } from "@/features/companies/data"
 import {
   getExternalHubCounts,
   getExternalMuniHubCounts,
@@ -143,12 +143,20 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.7,
   }))
 
-  // 求人がある企業ページだけをsitemapへ含める。0件ページはページ側でもnoindex。
+  // 維持下限を満たす企業ページだけをsitemapへ含める。件数の判定はページ側の index/noindex と同じ値。
+  // 振り分けは上で取った jobs を使い回す（companyName と更新日は既に取れているので、
+  // 企業ページ用の索引をもう一度引くと同じ全件取得が二重になる）。
+  const companyJobIndex = new Map<string, Job[]>()
+  for (const job of jobs) {
+    const slug = companySlugForJob(job)
+    if (!slug) continue
+    const list = companyJobIndex.get(slug)
+    if (list) list.push(job)
+    else companyJobIndex.set(slug, [job])
+  }
   const companyRoutes: MetadataRoute.Sitemap = FEATURED_COMPANIES.flatMap((company) => {
-    const matchingJobs = jobs.filter(
-      (job) => !job.hideCompanyName && matchesFeaturedCompany(job.companyName, company),
-    )
-    if (matchingJobs.length === 0) return []
+    const matchingJobs = companyJobIndex.get(company.slug) ?? []
+    if (matchingJobs.length < COMPANY_KEEP_JOBS) return []
 
     const latestTimestamp = matchingJobs.reduce((latest, job) => {
       const value = job.updatedAt ?? job.publishedAt

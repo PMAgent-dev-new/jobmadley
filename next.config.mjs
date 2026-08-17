@@ -1,3 +1,11 @@
+import { createRequire } from 'node:module'
+
+// 廃止した企業ページの遷移先はマスタ（companies.data.json）を唯一の出所にする。
+// ここに直書きすると、表から slug を消したときにリダイレクトだけ取り残される。
+const require = createRequire(import.meta.url)
+/** @type {{ retired: Array<{ slug: string, redirectTo: string }> }} */
+const companiesData = require('./src/features/companies/companies.data.json')
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // Turbopack設定（Next.js 16でデフォルト有効）
@@ -89,12 +97,13 @@ const nextConfig = {
   // リダイレクト設定
   async redirects() {
     return [
-      // 旧URLから新URLへのリダイレクト例
-      // {
-      //   source: '/old-path',
-      //   destination: '/new-path',
-      //   permanent: true,
-      // },
+      // 在庫が維持下限を割って畳んだ企業ページ。dynamicParams=false で404になる前にここで拾う。
+      // 404にせず301で送るのは、既にインデックスされたURLと外部リンクを捨てないため。
+      ...companiesData.retired.map((company) => ({
+        source: `/companies/${company.slug}`,
+        destination: company.redirectTo,
+        permanent: true,
+      })),
     ]
   },
 
