@@ -101,14 +101,17 @@ export default function HubPage({
   external,
 }: HubPageProps) {
   const hasHero = Boolean(heroImage || heroLabel)
-  // companyCount は companyName のユニーク数。法人単位の企業ページでは全件が同じ会社なので、
-  // これは「掲載企業◯社」ではなく営業所・店舗の数になる。単位を偽らないよう見出しを切り替える。
-  const companyCountLabel = singleCompany
-    ? { term: "掲載事業所", unit: "拠点" }
-    : { term: "掲載企業", unit: "社" }
-  // 店舗名が求人ごとに違う会社（レッドバロン等）では拠点数＝掲載件数になり、
-  // 掲載件数タイルの繰り返しにしかならないので出さない。
-  const companyCountIsRedundant = singleCompany && stats.companyCount === stats.count
+  // companyCount は companyName のユニーク数。地域・職種ハブでは「掲載企業◯社」で正しい。
+  //
+  // ⚠️ 企業ページ（singleCompany）では出さない。全件が同じ会社なので意味としては
+  // 「営業所・店舗の数」になるが、companyName は自由記述で表記ゆれがあり正しく数えられない。
+  // 実測: 京浜交通は「京浜交通株式会社 弁天橋営業所」「京浜交通 株式会社 弁天橋営業所」
+  // 「京浜交通グループ　京浜交通株式会社 弁天橋営業所」が別物として3回数えられ、実質3拠点が
+  // 7拠点と出ていた。日興自動車に至っては「運行管理者」「事故交渉人」という職種名つきの
+  // 同一社名が拠点として数えられ、実質1拠点が4拠点になっていた（正規化でも解けない）。
+  // 誤った件数を index されるページに出すのは、このPRが解こうとしている問題そのもの。
+  // 拠点数を確実に出せる根拠（構造化された営業所マスタ）ができるまでは非表示にする。
+  const showCompanyCount = !singleCompany && stats.companyCount > 0
   const breadcrumbLd = generateBreadcrumbStructuredData(breadcrumb)
   // ItemList はこのページに実際に並ぶ求人（自社＋外部）を列挙する。
   // 自社求人0件・外部求人のみのハブ（例: 青森県×トラックドライバー）で
@@ -206,12 +209,10 @@ export default function HubPage({
                 <dd className="text-lg font-bold text-gray-900">{stats.salaryText}</dd>
               </div>
             )}
-            {stats.companyCount > 0 && !companyCountIsRedundant && (
+            {showCompanyCount && (
               <div className="rounded-lg bg-gray-50 p-3">
-                <dt className="text-xs text-gray-500">{companyCountLabel.term}</dt>
-                <dd className="text-lg font-bold text-gray-900">
-                  {stats.companyCount}{companyCountLabel.unit}
-                </dd>
+                <dt className="text-xs text-gray-500">掲載企業</dt>
+                <dd className="text-lg font-bold text-gray-900">{stats.companyCount}社</dd>
               </div>
             )}
             {stats.employmentText && (
