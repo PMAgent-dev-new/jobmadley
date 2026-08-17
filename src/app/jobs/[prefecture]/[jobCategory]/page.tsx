@@ -117,7 +117,7 @@ export default async function Page({ params }: Props) {
     : jobs
   const stats = { ...computeHubStats(statsJobs), count: totalCount }
   // 掲載中求人そのものから作る内訳（給与の分布・勤務条件別の件数）。競合が持てない一次情報。
-  const inventory = buildInventoryBreakdown(statsJobs, cat.name)
+  const inventory = buildInventoryBreakdown(statsJobs, `${pref.region}の${cat.name}`)
   const jobLinks = statsJobs.slice(0, 200).map((j) => ({ id: j.id, name: j.jobName ?? j.title ?? "求人" }))
   const cc = catContent[cat.slug!]
   const content = await getHubContent(base)

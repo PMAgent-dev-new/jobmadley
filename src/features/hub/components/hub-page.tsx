@@ -236,7 +236,7 @@ export default function HubPage({
         {inventory && (inventory.salary || inventory.conditions.length > 0) && (
           <section className="mt-10" aria-labelledby="hub-inventory">
             <h2 id="hub-inventory" className="text-xl font-bold text-gray-900 border-l-4 border-primary pl-3">
-              掲載中の{summaryLabel}求人の内訳
+              {summaryLabel}求人の内訳（詳細条件を登録済みの{inventory.totalJobs}件）
             </h2>
             {inventory.salary && (
               <p className="mt-3 text-gray-700 leading-relaxed">{inventory.salary.text}</p>
@@ -244,15 +244,15 @@ export default function HubPage({
             {inventory.conditions.length > 0 && (
               <>
                 <p className="mt-4 text-gray-700 leading-relaxed">
-                  勤務条件ごとの掲載件数です。求人票に記載のある条件だけを数えています。
+                  勤務条件ごとの件数です。求人票に記載のある条件だけを数えています。
                 </p>
                 <div className="mt-3 overflow-x-auto">
                   <table className="w-full min-w-[20rem] text-left text-sm">
                     <thead>
                       <tr className="border-b border-gray-200 text-gray-500">
                         <th scope="col" className="py-2 pr-4 font-medium">条件</th>
-                        <th scope="col" className="py-2 pr-4 font-medium">掲載件数</th>
-                        <th scope="col" className="py-2 font-medium">掲載中の求人に占める割合</th>
+                        <th scope="col" className="py-2 pr-4 font-medium">件数</th>
+                        <th scope="col" className="py-2 font-medium">{inventory.totalJobs}件に占める割合</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -260,7 +260,7 @@ export default function HubPage({
                         <tr key={c.name} className="border-b border-gray-100">
                           <th scope="row" className="py-2 pr-4 font-normal text-gray-900">{c.name}</th>
                           <td className="py-2 pr-4 text-gray-900">{c.count}件</td>
-                          <td className="py-2 text-gray-600">{c.share}%</td>
+                          <td className="py-2 text-gray-600">{c.share === undefined ? "—" : `${c.share}%`}</td>
                         </tr>
                       ))}
                     </tbody>
