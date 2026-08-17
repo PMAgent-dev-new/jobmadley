@@ -13,6 +13,7 @@ import {
   getHubData,
   getMunicipalityContentEntries,
 } from "@/features/hub/lib/hub"
+import { hubQualifies } from "@/features/hub/lib/hub-qualify"
 import { COMPANY_KEEP_JOBS, FEATURED_COMPANIES, companySlugForJob } from "@/features/companies/data"
 import {
   getExternalHubCounts,
@@ -36,10 +37,8 @@ const getHubRoutes = async (): Promise<MetadataRoute.Sitemap> => {
   for (const p of withSlug(prefectures)) {
     routes.push({ url: `${SITE_URL}${hubUrl.prefecture(p.slug)}`, changeFrequency: "daily", priority: 0.6 })
     for (const c of withSlug(categories)) {
-      if (
-        prefCatCount(matrix, p.id, c.id) >= HUB_MIN_JOBS ||
-        qualifiesByExternalJobs(externalCounts, p.region, c.slug)
-      ) {
+      // 判定は県ハブ・職種ハブのリンクと同じ hubQualifies を使う（3か所で複製しない）
+      if (hubQualifies(matrix.byPrefectureCategory, externalCounts, p, c)) {
         routes.push({
           url: `${SITE_URL}${hubUrl.prefectureCategory(p.slug, c.slug)}`,
           changeFrequency: "daily",

@@ -8,6 +8,7 @@
  * フォールバックを置くことで Vercel env 未設定でもデプロイ直後から動作する。env で上書き推奨。
  */
 import { unstable_cache } from "next/cache"
+import { externalHubKey as hubKeyOf, HUB_MIN_EXTERNAL_JOBS as MIN_EXTERNAL } from "@/features/hub/lib/hub-qualify"
 import type { ExternalJob } from "./types"
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://urvkgyohtqfxmymaivth.supabase.co"
@@ -334,11 +335,12 @@ export const getExternalJobsForCategories = async (params: {
  * 自社求人の HUB_MIN_JOBS(=5) と役割は同じだが、外部は在庫が桁違いに厚いので
  * 薄いページを増やさないよう高めに置く（20件＝107ハブ／対象在庫の97%をカバー）。
  */
-export const HUB_MIN_EXTERNAL_JOBS = 20
+/** @see hub-qualify.ts（しきい値の出所） */
+export const HUB_MIN_EXTERNAL_JOBS = MIN_EXTERNAL
 
 /** 件数マトリクスのキー。prefecture は prefectures.region（例「東京都」）。 */
-export const externalHubKey = (prefectureRegion: string, hubCatSlug: string): string =>
-  `${prefectureRegion}|${hubCatSlug}`
+/** @see hub-qualify.ts（キーの出所。ここは互換のための再エクスポート） */
+export const externalHubKey = hubKeyOf
 
 export type ExternalHubCounts = Record<string, number>
 

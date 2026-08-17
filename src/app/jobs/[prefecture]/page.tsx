@@ -5,9 +5,7 @@ import { getJobsPaged, getJobsForStats } from "@/features/jobs/api"
 import {
   getExternalJobsForPrefecture,
   getExternalHubCounts,
-  externalHubKey,
   externalPrefectureTotal,
-  qualifiesByExternalJobs,
   EXTERNAL_PAGE_SIZE,
 } from "@/features/external-jobs/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
@@ -26,6 +24,7 @@ import {
   buildHubFaqs,
   getHubContent,
 } from "@/features/hub/lib/hub"
+import { hubQualifies, hubLinkCount } from "@/features/hub/lib/hub-qualify"
 
 // オンデマンドISR（generateStaticParams=[] で動的セグメントをISR化）。ページングは廃止し
 // 上位 HUB_PAGE_SIZE 件＋「すべて見る」→/search に集約。求人はsitemapで全件クロール可。
@@ -74,19 +73,16 @@ export default async function Page({ params }: Props) {
   // ⚠️ 判定は sitemap.ts と必ず同じにする（自社しきい値 または 転載しきい値）。
   // 以前は自社件数だけで絞っていたため、転載求人だけで成立するハブが sitemap には載るのに
   // 親からリンクされない状態だった。本番実測で 268本中203本（75%）が該当し、
-  // 北海道・広島・熊本・岡山などは配下7本中6本が孤立していた。
+  // 北海道・広島・岡山は配下7本中6本、熊本は6本すべてが孤立していた。
   // 件数ラベルも遷移先ページの表示（自社＋転載の合算）に揃える。ラベルだけ自社件数だと
   // 「265件」と書いたリンクの先に2,157件が並ぶという逆向きの食い違いになる。
   const externalCounts = await getExternalHubCounts()
   const catsInKen = withSlug(categories)
-    .map((c) => {
-      const own = prefCatCount(matrix, pref.id, c.id)
-      const ext = externalCounts[externalHubKey(pref.region, c.slug)] ?? 0
-      return { cat: c, own, ext }
-    })
-    .filter(({ cat, own }) => own >= HUB_MIN_JOBS || qualifiesByExternalJobs(externalCounts, pref.region, cat.slug))
-    .map(({ cat, own, ext }) => ({
-      label: `${pref.region}の${cat.name}（${own + ext}件）`,
+    .map((c) => ({ cat: c, n: hubLinkCount(matrix.byPrefectureCategory, externalCounts, pref, c) }))
+    .filter(({ cat }) => hubQualifies(matrix.byPrefectureCategory, externalCounts, pref, cat))
+    .sort((a, b) => b.n - a.n)
+    .map(({ cat, n }) => ({
+      label: `${pref.region}の${cat.name}（${n}件）`,
       href: hubUrl.prefectureCategory(pref.slug!, cat.slug),
     }))
 

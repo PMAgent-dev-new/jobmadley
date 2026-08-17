@@ -7,6 +7,7 @@ import {
   hasExternalJobsForCategory,
   getExternalCategoryCount,
   EXTERNAL_PAGE_SIZE,
+  getExternalHubCounts,
 } from "@/features/external-jobs/api"
 import { getMediaArticlesByKeyword } from "@/features/media/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
@@ -31,6 +32,7 @@ import {
   catNameWithSynonym,
   featuresForCatSlug,
 } from "@/features/hub/lib/hub"
+import { hubQualifies, hubLinkCount } from "@/features/hub/lib/hub-qualify"
 
 // オンデマンドISR（generateStaticParams=[] で動的セグメントをISR化）。ページングは廃止し
 // 上位 HUB_PAGE_SIZE 件＋「すべて見る」→/search に集約。求人はsitemapで全件クロール可。
@@ -78,10 +80,17 @@ export default async function Page({ params }: Props) {
     limit: HUB_PAGE_SIZE,
   })
 
-  // この職種の求人がある都道府県ハブ（県×職種）へのリンク（件数しきい値以上・多い順）
+  // この職種で成立している県×職種ハブへのリンク（多い順）。
+  //
+  // ⚠️ 県ハブ・sitemap と同じ hubQualifies / hubLinkCount を使う。
+  // 以前はここだけ自社件数で絞っていたため、同じURLを県ハブは「511件」、
+  // 職種ハブは「88件」と表示する食い違いが出ていた（/jobs/aichi/car-mechanic の実測）。
+  // 転載だけで成立するハブへのリンクもこちらには無く、トラック・配送・送迎は
+  // 県ハブへのリンクが0本だった。
+  const externalHubCounts = await getExternalHubCounts()
   const kensForCat = withSlug(prefectures)
-    .map((p) => ({ p, n: prefCatCount(matrix, p.id, cat.id) }))
-    .filter((x) => x.n >= HUB_MIN_JOBS)
+    .map((p) => ({ p, n: hubLinkCount(matrix.byPrefectureCategory, externalHubCounts, p, { id: cat.id, slug: cat.slug! }) }))
+    .filter(({ p }) => hubQualifies(matrix.byPrefectureCategory, externalHubCounts, p, { id: cat.id, slug: cat.slug! }))
     .sort((a, b) => b.n - a.n)
     .map(({ p, n }) => ({
       label: `${p.region}の${cat.name}（${n}件）`,
