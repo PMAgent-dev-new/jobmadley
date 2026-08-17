@@ -12,6 +12,7 @@ import {
   generateFaqStructuredData,
 } from "@/shared/lib/metadata"
 import type { HubStats, HubFaq } from "@/features/hub/lib/hub"
+import type { InventoryBreakdown } from "@/features/hub/lib/inventory"
 
 export interface HubRelatedGroup {
   title: string
@@ -64,6 +65,12 @@ interface HubPageProps {
   heroEyebrow?: string
   /** 掲載求人がすべて同一法人（企業ページ）。件数まわりの単位表記を切り替える。 */
   singleCompany?: boolean
+  /**
+   * 掲載中求人そのものから作った内訳（給与の分布・勤務条件別の件数）。
+   * 「◯◯ 給料 / 年収 / 相場」「日勤のみ」「寮あり」のような条件つきクエリに実数で答えるための一次情報。
+   * 競合が真似できない材料なので、在庫のある職種ハブでは必ず渡す。
+   */
+  inventory?: InventoryBreakdown
   /** ハローワーク転載求人（自社求人とは別枠・出典明記で表示。対応職種のみ） */
   external?: {
     jobs: ExternalJob[]
@@ -98,6 +105,7 @@ export default function HubPage({
   heroLabel,
   heroEyebrow,
   singleCompany = false,
+  inventory,
   external,
 }: HubPageProps) {
   const hasHero = Boolean(heroImage || heroLabel)
@@ -223,6 +231,45 @@ export default function HubPage({
             )}
           </dl>
         </section>
+
+        {/* 掲載中求人の内訳（実データ由来の一次情報） */}
+        {inventory && (inventory.salary || inventory.conditions.length > 0) && (
+          <section className="mt-10" aria-labelledby="hub-inventory">
+            <h2 id="hub-inventory" className="text-xl font-bold text-gray-900 border-l-4 border-primary pl-3">
+              掲載中の{summaryLabel}求人の内訳
+            </h2>
+            {inventory.salary && (
+              <p className="mt-3 text-gray-700 leading-relaxed">{inventory.salary.text}</p>
+            )}
+            {inventory.conditions.length > 0 && (
+              <>
+                <p className="mt-4 text-gray-700 leading-relaxed">
+                  勤務条件ごとの掲載件数です。求人票に記載のある条件だけを数えています。
+                </p>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full min-w-[20rem] text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 text-gray-500">
+                        <th scope="col" className="py-2 pr-4 font-medium">条件</th>
+                        <th scope="col" className="py-2 pr-4 font-medium">掲載件数</th>
+                        <th scope="col" className="py-2 font-medium">掲載中の求人に占める割合</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inventory.conditions.map((c) => (
+                        <tr key={c.name} className="border-b border-gray-100">
+                          <th scope="row" className="py-2 pr-4 font-normal text-gray-900">{c.name}</th>
+                          <td className="py-2 pr-4 text-gray-900">{c.count}件</td>
+                          <td className="py-2 text-gray-600">{c.share}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </section>
+        )}
 
         {/* 職種の解説（Know意図） */}
         {categoryContent && (

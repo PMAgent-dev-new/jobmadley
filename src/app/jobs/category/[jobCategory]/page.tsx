@@ -32,6 +32,7 @@ import {
   catNameWithSynonym,
   featuresForCatSlug,
 } from "@/features/hub/lib/hub"
+import { buildInventoryBreakdown } from "@/features/hub/lib/inventory"
 import { hubQualifies, hubLinkCount } from "@/features/hub/lib/hub-qualify"
 
 // オンデマンドISR（generateStaticParams=[] で動的セグメントをISR化）。ページングは廃止し
@@ -121,6 +122,8 @@ export default async function Page({ params }: Props) {
     ? await getJobsForStats({ jobCategoryId: cat.id })
     : jobs
   const stats = { ...computeHubStats(statsJobs), count: totalCount }
+  // 掲載中求人そのものから作る内訳（給与の分布・勤務条件別の件数）。競合が持てない一次情報。
+  const inventory = buildInventoryBreakdown(statsJobs, cat.name)
   const jobLinks = statsJobs.slice(0, 200).map((j) => ({ id: j.id, name: j.jobName ?? j.title ?? "求人" }))
   const cc = catContent[cat.slug!]
   const group = groupForCatSlug(cat.slug!)
@@ -149,6 +152,7 @@ export default async function Page({ params }: Props) {
       summaryLabel={`${cat.name}（全国）`}
       summary={buildHubSummary(`全国の${cat.name}`, stats)}
       stats={stats}
+      inventory={inventory}
       totalCount={totalCount}
       jobs={jobs}
       jobLinks={jobLinks}

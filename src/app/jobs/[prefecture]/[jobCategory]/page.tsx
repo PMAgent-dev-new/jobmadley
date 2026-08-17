@@ -33,6 +33,7 @@ import {
   getMunicipalityContentEntries,
   hubArticleKeyword,
 } from "@/features/hub/lib/hub"
+import { buildInventoryBreakdown } from "@/features/hub/lib/inventory"
 
 // オンデマンドISR。動的セグメントは generateStaticParams が無いと動的レンダリング扱いで
 // revalidate が無効化されるため、空配列を返して「ビルド時は事前生成なし＋実アクセス時に
@@ -115,6 +116,8 @@ export default async function Page({ params }: Props) {
     ? await getJobsForStats({ prefectureId: pref.id, jobCategoryId: cat.id })
     : jobs
   const stats = { ...computeHubStats(statsJobs), count: totalCount }
+  // 掲載中求人そのものから作る内訳（給与の分布・勤務条件別の件数）。競合が持てない一次情報。
+  const inventory = buildInventoryBreakdown(statsJobs, cat.name)
   const jobLinks = statsJobs.slice(0, 200).map((j) => ({ id: j.id, name: j.jobName ?? j.title ?? "求人" }))
   const cc = catContent[cat.slug!]
   const content = await getHubContent(base)
@@ -192,6 +195,7 @@ export default async function Page({ params }: Props) {
       summaryLabel={label}
       summary={buildHubSummary(label, stats)}
       stats={stats}
+      inventory={inventory}
       totalCount={totalCount}
       jobs={jobs}
       jobLinks={jobLinks}
