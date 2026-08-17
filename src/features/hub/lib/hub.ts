@@ -8,10 +8,12 @@ import { getJobCountMatrix, type JobCountMatrix } from "@/features/jobs/api"
 import type { Prefecture, JobCategory } from "@/features/master/types"
 import type { Job } from "@/features/jobs/types"
 import { summarizeSalary } from "./salary"
+import { HUB_MIN_JOBS as MIN_JOBS, prefCatKey } from "./hub-qualify"
 import hubContentsData from "@/features/hub/hub-contents.data.json"
 
 /** 県×職種ハブを生成する最小求人数（これ未満の組合せは薄いページになるため作らない） */
-export const HUB_MIN_JOBS = 5
+/** @see hub-qualify.ts（判定の出所。ここは互換のための再エクスポート） */
+export const HUB_MIN_JOBS = MIN_JOBS
 
 /** 1ハブに表示する求人カードの上限（超過分は絞り込み検索へ誘導） */
 export const HUB_LIST_LIMIT = 60
@@ -255,7 +257,7 @@ export const getHubData = async (): Promise<{
 
 /** 県×職種の件数 */
 export const prefCatCount = (m: JobCountMatrix, prefId: string, catId: string): number =>
-  m.byPrefectureCategory[`${prefId}:${catId}`] ?? 0
+  m.byPrefectureCategory[prefCatKey(prefId, catId)] ?? 0
 
 /** slug を持ち、かつ件数条件を満たすものだけを対象にする小ヘルパー */
 export const withSlug = <T extends { slug?: string }>(items: T[]): (T & { slug: string })[] =>
