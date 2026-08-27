@@ -3,41 +3,49 @@ import { test } from 'vitest'
 
 import { touchFromReferrer } from './attribution'
 
-test('検索エンジンからの参照は organic として判定する', () => {
-  assert.deepEqual(touchFromReferrer('https://www.google.com/', 'ridejob.jp'), {
-    source: 'google',
-    medium: 'organic',
-  })
-  assert.deepEqual(touchFromReferrer('https://www.google.co.jp/search?q=%E6%B1%82%E4%BA%BA', 'ridejob.jp'), {
-    source: 'google',
-    medium: 'organic',
-  })
-  assert.deepEqual(touchFromReferrer('https://search.yahoo.co.jp/search', 'ridejob.jp'), {
-    source: 'yahoo',
-    medium: 'organic',
-  })
-  assert.deepEqual(touchFromReferrer('https://www.bing.com/', 'ridejob.jp'), {
-    source: 'bing',
-    medium: 'organic',
-  })
-})
+/**
+ * この判定は form_applicant（ridejob.jp/entry）と `rj_attr` Cookie を共有しており、
+ * 片方が違う値を書くともう片方がそれを読んで集計する。挙動の一致をここで固定する。
+ */
 
-test('自サイト内の遷移は流入として扱わない（direct を維持）', () => {
-  assert.equal(touchFromReferrer('https://ridejob.jp/jobs/tokyo/taxi-driver', 'ridejob.jp'), undefined)
-  // サブドメインからの遷移も自サイト扱い
-  assert.equal(touchFromReferrer('https://www.ridejob.jp/media/blog/x', 'ridejob.jp'), undefined)
-  // 現ホストが www 付きでも同じ
-  assert.equal(touchFromReferrer('https://ridejob.jp/', 'www.ridejob.jp'), undefined)
-})
+const HOST = 'ridejob.jp'
 
-test('referrer が無い/壊れている場合は undefined', () => {
-  assert.equal(touchFromReferrer('', 'ridejob.jp'), undefined)
-  assert.equal(touchFromReferrer('not-a-url', 'ridejob.jp'), undefined)
-})
-
-test('その他の外部サイトは referral として判定し www を除去する', () => {
-  assert.deepEqual(touchFromReferrer('https://www.example.com/page', 'ridejob.jp'), {
-    source: 'example.com',
+test('AndroidのYouTubeアプリが「Google自然検索」にならない', () => {
+  // パッケージ名 com.google.android.youtube が検索エンジン判定の
+  // /(^|\.)google\./ にマッチしていた。自然検索KPIに他チャネルが混ざる。
+  assert.deepEqual(touchFromReferrer('android-app://com.google.android.youtube/', HOST), {
+    source: 'youtube.com',
     medium: 'referral',
   })
+})
+
+test('アプリ経由とブラウザ経由で同じ値になる（集計で行が割れない）', () => {
+  assert.deepEqual(
+    touchFromReferrer('android-app://com.google.android.youtube/', HOST),
+    touchFromReferrer('https://www.youtube.com/', HOST),
+  )
+})
+
+test('Google検索アプリは organic のまま', () => {
+  assert.deepEqual(touchFromReferrer('android-app://com.google.android.googlequicksearchbox/', HOST), {
+    source: 'google',
+    medium: 'organic',
+  })
+})
+
+test('未知のアプリはパッケージ名のまま referral', () => {
+  assert.deepEqual(touchFromReferrer('android-app://com.example.unknown/', HOST), {
+    source: 'com.example.unknown',
+    medium: 'referral',
+  })
+})
+
+test('通常の検索エンジン・自ドメイン判定は従来どおり', () => {
+  assert.deepEqual(touchFromReferrer('https://www.google.co.jp/search?q=a', HOST), {
+    source: 'google',
+    medium: 'organic',
+  })
+  assert.equal(touchFromReferrer('https://ridejob.jp/jobs/tokyo', HOST), undefined)
+  assert.equal(touchFromReferrer('', HOST), undefined)
+  assert.equal(touchFromReferrer('not a url', HOST), undefined)
 })

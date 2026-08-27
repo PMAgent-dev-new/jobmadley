@@ -54,7 +54,16 @@ const parseCookies = (): Record<string, string> => {
     if (idx === -1) return acc
     const key = cookie.slice(0, idx)
     const value = cookie.slice(idx + 1)
-    if (key) acc[key] = decodeURIComponent(value)
+    if (!key) return acc
+    // ⚠️ decode は1本ずつ try で囲む。`%` を生で含む Cookie が1つでもあると
+    // decodeURIComponent が URIError を投げ、**このドメインの全 Cookie の読み取りが失敗する**。
+    // UTMCapture は root layout で全ページ動くため、effect の未捕捉例外＝サイト全体が
+    // エラー画面になる。Cookie を書く主体は GTM 経由の計測タグを含め複数ある。
+    try {
+      acc[key] = decodeURIComponent(value)
+    } catch {
+      acc[key] = value
+    }
     return acc
   }, {} as Record<string, string>)
 }
@@ -87,21 +96,46 @@ const SEARCH_ENGINE_HOSTS: ReadonlyArray<[RegExp, string]> = [
  * - 自サイト内遷移 / referrer 無し → undefined（direct のまま。既存挙動を変えない）
  * - その他の外部サイト → { source: ホスト名, medium: "referral" }
  */
+/**
+ * ネイティブアプリからの遷移は `android-app://<パッケージ名>` で来る。
+ *
+ * ⚠️ 特別扱いしないと、パッケージ名がホスト名として扱われ
+ * `com.google.android.youtube` が上の `/(^|\.)google\./` に**マッチしてしまう**。
+ * つまり Android の YouTube アプリからの流入が「Google自然検索」として記録され、
+ * 自然検索KPIに他チャネルが混ざる。
+ *
+ * ⚠️ この表は form_applicant（ridejob.jp/entry）と同一に保つこと。
+ * 同一オリジンで `rj_attr` Cookie を共有しているため、片方が別の値を書くと
+ * もう片方がその値を読んで集計する。
+ */
+const APP_PACKAGE_SOURCES: Record<string, { source: string; medium: string }> = {
+  "com.google.android.youtube": { source: "youtube.com", medium: "referral" },
+  "com.google.android.googlequicksearchbox": { source: "google", medium: "organic" },
+  "com.google.android.gm": { source: "gmail", medium: "referral" },
+}
+
 export const touchFromReferrer = (
   referrer: string,
   currentHost: string,
 ): Partial<AttributionTouch> | undefined => {
   if (!referrer) return undefined
-  let host: string
+  let url: URL
   try {
-    host = new URL(referrer).hostname.toLowerCase()
+    url = new URL(referrer)
   } catch {
     return undefined
   }
+  const host = url.hostname.toLowerCase()
   if (!host) return undefined
 
+  // http(s) 以外はホスト名がドメインではないので、検索エンジン判定に通さない。
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    const known = APP_PACKAGE_SOURCES[host]
+    return known ? { ...known } : { source: host, medium: "referral" }
+  }
+
   // 自ドメイン（サブドメイン含む）からの遷移は流入ではない
-  const self = currentHost.toLowerCase().replace(/^www\./, "")
+  const self = currentHost.toLowerCase().replace(/^www\./, "").replace(/:\d+$/, "")
   if (self && (host === self || host.endsWith(`.${self}`))) return undefined
 
   for (const [pattern, name] of SEARCH_ENGINE_HOSTS) {
