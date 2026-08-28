@@ -34,6 +34,13 @@ export type Attribution = {
   lastTouch?: AttributionTouch
   fbclid?: string
   gclid?: string
+  /**
+   * ChatGPT広告のクリック識別子。OpenAI が着地URLへ自動付与する。
+   * 送信先はまだ無いが、後から Pixel / Conversions API を入れても保存していなかった期間は
+   * 遡って紐づけられないため、先に保存だけしておく。
+   * ⚠️ form_applicant と同じ Cookie(rj_attr) を共有しているのでスキーマを揃えること。
+   */
+  oppref?: string
   /** 初回接触時のランディングパス（origin なし） */
   landing?: string
   /** 初回接触時の document.referrer */
@@ -196,6 +203,7 @@ export function captureAttribution(
   const touchParams = readTouchParams(params)
   const fbclid = params.get("fbclid")?.trim() || undefined
   const gclid = params.get("gclid")?.trim() || undefined
+  const oppref = params.get("oppref")?.trim() || undefined
 
   const current = readAttribution()
 
@@ -205,7 +213,9 @@ export function captureAttribution(
   // なぜ「無いときだけ」か: 既存の lastTouch（広告など）を後続の自然検索で上書きすると
   // 広告の成果計測（CPA）が変わってしまうため。ここでは direct に落ちていた分だけを
   // organic/referral として救い、有料の帰属には一切影響を与えない。
-  if (!isMeaningful(touchParams) && !fbclid && !gclid) {
+  // oppref を含めないと、UTMが欠けたChatGPT広告のクリックが referrer 推定に落ち、
+  // chatgpt.com からの自然流入として記録される（＝広告費がAIO成果に混入する）。
+  if (!isMeaningful(touchParams) && !fbclid && !gclid && !oppref) {
     if (current.lastTouch || current.firstTouch) return current
 
     const host =
@@ -235,6 +245,7 @@ export function captureAttribution(
     lastTouch: isMeaningful(touchParams) ? touch : current.lastTouch,
     fbclid: fbclid ?? current.fbclid,
     gclid: gclid ?? current.gclid,
+    oppref: oppref ?? current.oppref,
     landing: current.landing ?? path,
     referrer: current.referrer ?? (referrer || undefined),
   }

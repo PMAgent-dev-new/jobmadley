@@ -48,6 +48,8 @@ export const normalizeSource = (
 export type MarketingChannel =
   | "paid_social"
   | "paid_search"
+  | "paid_ai"
+  | "ai_search"
   | "organic_search"
   | "job_board"
   | "referral"
@@ -57,6 +59,8 @@ export type MarketingChannel =
 const CHANNEL_LABEL: Record<MarketingChannel, string> = {
   paid_social: "有料SNS広告",
   paid_search: "リスティング広告",
+  paid_ai: "AIアシスタント広告",
+  ai_search: "AI検索",
   organic_search: "自然検索",
   job_board: "求人媒体",
   referral: "参照サイト",
@@ -69,6 +73,28 @@ const PAID_SOCIAL_MEDIUMS = new Set(["catalog", "paid_social", "paidsocial", "cp
 const SEARCH_SOURCES = new Set(["google", "yahoo", "bing", "yahoo!", "duckduckgo"])
 const PAID_MEDIUMS = new Set(["cpc", "ppc", "paid", "paidsearch", "paid_search", "sem"])
 const JOB_BOARD_SOURCES = new Set(["standby", "kyujinbox", "indeed", "stanby"])
+
+/** ChatGPT等のAIアシスタント。広告(ChatGPT Ads)と回答内引用からの自然流入の両方がここに来る。 */
+const AI_ASSISTANT_SOURCES = new Set([
+  "openai",
+  "chatgpt",
+  "chatgpt.com",
+  "chat.openai.com",
+  "perplexity",
+  "perplexity.ai",
+  "copilot",
+  "copilot.microsoft.com",
+])
+
+/**
+ * AI広告の判定にだけ使う medium 表記。
+ *
+ * ⚠️ PAID_MEDIUMS に "ad"/"ads" を足して統一したくなるが、それをやると
+ * tiktok+ad のような「有料SNSだがSNS判定に載っていない」流入まで
+ * 「リスティング広告」に化ける。ここでの拡張はAI系 source に限定する。
+ * （form_applicant 側の AD_MEDIUMS と語彙を揃えてある）
+ */
+const AI_AD_MEDIUMS = new Set(["ad", "ads", "cpc", "ppc", "paid", "sem"])
 
 /**
  * utm_source / utm_medium / applicationSource からマーケティングチャネルを正規化分類する。
@@ -90,6 +116,11 @@ export const classifyChannel = (
 
   // 有料SNS（Meta広告・カタログ/フィード広告を含む）
   if (PAID_SOCIAL_SOURCES.has(s) || PAID_SOCIAL_MEDIUMS.has(m)) return wrap("paid_social")
+
+  // AIアシスタント。**汎用 cpc/ppc 判定より前**に置く。
+  // 後ろに置くと utm_medium=cpc のChatGPT広告が「リスティング広告」に化け、
+  // 検索広告の実績に混ざって両方読めなくなる。
+  if (AI_ASSISTANT_SOURCES.has(s)) return AI_AD_MEDIUMS.has(m) ? wrap("paid_ai") : wrap("ai_search")
 
   // 検索エンジン: medium が有料なら paid_search、それ以外は organic_search
   if (SEARCH_SOURCES.has(s)) return PAID_MEDIUMS.has(m) ? wrap("paid_search") : wrap("organic_search")
