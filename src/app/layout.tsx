@@ -20,6 +20,14 @@ const zenMaruGothic = Zen_Maru_Gothic({
   weight: ['500', '700', '900'],
   display: 'swap',
   variable: '--font-display',
+  // preload しない。next/font は subsets 指定だけでは和文グリフを絞れず、
+  // このファミリだけで unicode-range 分割された woff2 が239本生成される。
+  // 実測(2026-08-24 /jobs/tokyo/truck-driver): 全ページで as="font" の preload が480本、
+  // 合計6.66MBのうち和文2ファミリが6.60MB(99.2%)。HTMLの61,440バイト(全体の22.4%)も
+  // preloadタグが占めていた。as="font" は最高優先度で、LCP画像やCSSと帯域を奪い合う。
+  // display:'swap' と unicode-range は preload と独立に効くので、実際に必要な
+  // サブセットだけがブラウザ判断で取得される（CLS対策のフォールバックメトリクスも維持される）。
+  preload: false,
 })
 
 const zenKakuGothicNew = Zen_Kaku_Gothic_New({
@@ -27,6 +35,8 @@ const zenKakuGothicNew = Zen_Kaku_Gothic_New({
   weight: ['500', '700', '900'],
   display: 'swap',
   variable: '--font-body',
+  // 同上（和文ファミリ）。Inter / Archivo Black は各1本・計58KBなので preload を維持する。
+  preload: false,
 })
 
 const archivoBlack = Archivo_Black({
