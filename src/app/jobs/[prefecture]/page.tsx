@@ -2,6 +2,7 @@ import { notFound } from "next/navigation"
 import type { Metadata } from "next"
 import HubPage from "@/features/hub/components/hub-page"
 import { getJobsPaged, getJobsForStats } from "@/features/jobs/api"
+import { getMediaArticlesByKeyword } from "@/features/media/api"
 import {
   getExternalJobsForPrefecture,
   getExternalHubCounts,
@@ -18,6 +19,7 @@ import {
   searchUrl,
   getHubData,
   prefCatCount,
+  hubArticleKeyword,
   withSlug,
   computeHubStats,
   buildHubSummary,
@@ -77,14 +79,16 @@ export default async function Page({ params }: Props) {
   // 件数ラベルも遷移先ページの表示（自社＋転載の合算）に揃える。ラベルだけ自社件数だと
   // 「265件」と書いたリンクの先に2,157件が並ぶという逆向きの食い違いになる。
   const externalCounts = await getExternalHubCounts()
-  const catsInKen = withSlug(categories)
+  // 在庫件数の降順。関連記事の選定にも使うので slug を持ったまま保持する。
+  const rankedCats = withSlug(categories)
     .map((c) => ({ cat: c, n: hubLinkCount(matrix.byPrefectureCategory, externalCounts, pref, c) }))
     .filter(({ cat }) => hubQualifies(matrix.byPrefectureCategory, externalCounts, pref, cat))
     .sort((a, b) => b.n - a.n)
-    .map(({ cat, n }) => ({
-      label: `${pref.region}の${cat.name}（${n}件）`,
-      href: hubUrl.prefectureCategory(pref.slug!, cat.slug),
-    }))
+
+  const catsInKen = rankedCats.map(({ cat, n }) => ({
+    label: `${pref.region}の${cat.name}（${n}件）`,
+    href: hubUrl.prefectureCategory(pref.slug!, cat.slug),
+  }))
 
   const base = hubUrl.prefecture(pref.slug!)
   const statsJobs = totalCount > jobs.length
@@ -110,6 +114,30 @@ export default async function Page({ params }: Props) {
   const jobLinks = statsJobs.slice(0, 200).map((j) => ({ id: j.id, name: j.jobName ?? j.title ?? "求人" }))
   const content = await getHubContent(base)
 
+  // 県ハブ→メディア記事の相互リンク。
+  // 県×職種ハブには既に3本ずつ入っているが、県ハブ47枚には1本も無かった（実測10県すべて0本）。
+  // 県ハブは表示が最も多く順位が最も低い層（例 /jobs/tottori は表示1,324で31.1位）である一方、
+  // メディアは194ページ中167ページが1〜10位。強い面から弱い面へ内部リンクを通す。
+  //
+  // 県ハブは職種が定まらないので、その県で在庫が最も多い職種の記事を出す。
+  // catsInKen は在庫件数の降順に並んでいるので先頭から拾えばよい。
+  // 記事が引けない職種はスキップし、最大3本まで（県×職種ハブと同じ本数に揃える）。
+  const relatedArticles = (
+    await Promise.all(
+      rankedCats.slice(0, 3).map(async ({ cat }) => {
+        const kw = hubArticleKeyword(cat.slug)
+        if (!kw) return []
+        const list = await getMediaArticlesByKeyword(kw)
+        return list.slice(0, 1).map((a) => ({
+          title: a.title,
+          href: `https://ridejob.jp/media/blog/${a.slug ?? a.id}`,
+          image: a.eyecatch?.url,
+          date: a.publishedAt?.slice(0, 10),
+        }))
+      }),
+    )
+  ).flat()
+
   return (
     <HubPage
       breadcrumb={[
@@ -127,6 +155,7 @@ export default async function Page({ params }: Props) {
       jobLinks={jobLinks}
       external={external}
       faqs={buildHubFaqs({ region: pref.region, stats, externalCount: external?.count ?? 0 })}
+      relatedArticles={relatedArticles}
       moreHref={searchUrl({ prefectureId: pref.id })}
       related={[{ title: `${pref.region}の職種から探す`, links: catsInKen }]}
     />
