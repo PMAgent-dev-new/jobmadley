@@ -354,6 +354,50 @@ const COUNT_PAGE = 1000
 const COUNT_MAX_PAGES = 80
 
 /** 上限に達したら黙って切り捨てず必ず記録する（気づけない過少集計が一番こわい）。 */
+/**
+ * 件数集計のページングを、部分失敗を握り潰さずに取り切る。
+ *
+ * rawQuery は失敗時に例外ではなく {rows: [], ok: false} を返す。集計側がこれを
+ * そのまま flatMap すると「取得できなかったページ＝0件」として集計され、
+ * しかも unstable_cache が **壊れた集計値を1時間キャッシュする**。
+ * order は source_id.asc で、ハローワーク求人番号は都道府県ブロック順に並ぶため、
+ * 1ページ落ちると欠落が県単位に固まる（鳥取の掲載件数が 201→29 のように化ける）。
+ * この件数は hubQualifies / hubLinkCount 経由で sitemap 収録と親ハブからの内部リンクも
+ * 決めているので、地域ハブ全体の土台が日替わりで揺れることになる。
+ *
+ * 対策は2段構え。まず失敗ページだけを1回だけ引き直す（実障害の大半は一時的な失敗）。
+ * それでも欠けるならキャッシュに載せず throw する。呼び出し側は従来どおり空で
+ * 縮退するが、**壊れた値が1時間残らない**ので次のリクエストで自己回復する。
+ */
+async function fetchAllPages(
+  page: (offset: number, wantCount?: boolean) => Promise<{ rows: Record<string, unknown>[]; count: number; ok: boolean }>,
+  label: string,
+): Promise<Record<string, unknown>[] | null> {
+  const first = await page(0, true)
+  if (!first.ok) return null
+  if (first.rows.length === 0) return []
+
+  const offsets = Array.from({ length: pageCount(first.count) - 1 }, (_, i) => (i + 1) * COUNT_PAGE)
+  const results = await Promise.all(offsets.map((o) => page(o)))
+
+  // 失敗したページだけを1回だけ引き直す（実障害の大半は一時的な失敗のため）
+  const failedIdx = results.flatMap((r, i) => (r.ok ? [] : [i]))
+  if (failedIdx.length > 0) {
+    console.warn(
+      `[external-jobs] ${label}: ${failedIdx.length}/${offsets.length} ページ取得失敗。引き直します`,
+    )
+    const retried = await Promise.all(failedIdx.map((i) => page(offsets[i])))
+    retried.forEach((r, k) => {
+      results[failedIdx[k]] = r
+    })
+    if (results.some((r) => !r.ok)) {
+      console.error(`[external-jobs] ${label}: 引き直しても欠けるため集計をキャッシュしません`)
+      return null
+    }
+  }
+  return [first, ...results].flatMap((r) => r.rows)
+}
+
 const pageCount = (total: number): number => {
   const needed = Math.ceil(total / COUNT_PAGE)
   if (needed > COUNT_MAX_PAGES) {
@@ -373,7 +417,7 @@ const pageCount = (total: number): number => {
  * 1行あたり数十バイト・約1.8万行で、各ページ取得は fetch キャッシュに載る。
  * 失敗時は空を返す＝外部求人ゼロ扱いとなり、自社求人だけの従来挙動に戻る（加算的設計）。
  */
-export const getExternalHubCounts = unstable_cache(
+const fetchExternalHubCounts = unstable_cache(
   async (): Promise<ExternalHubCounts> => {
     const cats = Object.keys(EXTERNAL_CATEGORY_TO_HUB)
     const inList = `(${cats.map((c) => `"${c}"`).join(",")})`
@@ -389,15 +433,11 @@ export const getExternalHubCounts = unstable_cache(
         wantCount,
       )
 
-    const first = await page(0, true)
-    if (first.rows.length === 0) return {}
-    const pages = pageCount(first.count)
-    const rest = await Promise.all(
-      Array.from({ length: pages - 1 }, (_, i) => page((i + 1) * COUNT_PAGE)),
-    )
+    const rows = await fetchAllPages(page, "県×職種の件数")
+    if (rows === null) throw new Error("external hub counts: partial fetch failure")
 
     const counts: ExternalHubCounts = {}
-    for (const row of [first, ...rest].flatMap((p) => p.rows)) {
+    for (const row of rows) {
       const slug = EXTERNAL_CATEGORY_TO_HUB[String(row.job_category ?? "")]
       const region = String(row.prefecture ?? "")
       if (!slug || !region) continue
@@ -409,6 +449,19 @@ export const getExternalHubCounts = unstable_cache(
   ["external-hub-counts"],
   { revalidate: REVALIDATE },
 )
+
+/**
+ * 部分失敗のときは throw させ、unstable_cache に壊れた値を残さない。
+ * 呼び出し側（ハブ・sitemap）は従来どおり空で縮退するが、その縮退は
+ * このリクエスト限りで、次のリクエストは引き直しから始まる。
+ */
+export const getExternalHubCounts = async (): Promise<ExternalHubCounts> => {
+  try {
+    return await fetchExternalHubCounts()
+  } catch {
+    return {}
+  }
+}
 
 /**
  * 条件（働き方）ハブ向け。title か description に該当語を含む求人を引く。
@@ -514,7 +567,7 @@ export const externalMuniHubKey = (
  * 市区町村×職種の件数マトリクス。generateStaticParams・sitemap・生成判定に使う。
  * (prefecture, municipality_name, job_category) を射影して全件取得しアプリ側で集計。
  */
-export const getExternalMuniHubCounts = unstable_cache(
+const fetchExternalMuniHubCounts = unstable_cache(
   async (): Promise<ExternalHubCounts> => {
     const cats = Object.keys(EXTERNAL_CATEGORY_TO_HUB)
     const inList = `(${cats.map((c) => `"${c}"`).join(",")})`
@@ -530,14 +583,11 @@ export const getExternalMuniHubCounts = unstable_cache(
         },
         wantCount,
       )
-    const first = await page(0, true)
-    if (first.rows.length === 0) return {}
-    const pages = pageCount(first.count)
-    const rest = await Promise.all(
-      Array.from({ length: pages - 1 }, (_, i) => page((i + 1) * COUNT_PAGE)),
-    )
+    const rows = await fetchAllPages(page, "市区町村×職種の件数")
+    if (rows === null) throw new Error("external muni hub counts: partial fetch failure")
+
     const counts: ExternalHubCounts = {}
-    for (const row of [first, ...rest].flatMap((p) => p.rows)) {
+    for (const row of rows) {
       const slug = EXTERNAL_CATEGORY_TO_HUB[String(row.job_category ?? "")]
       const region = String(row.prefecture ?? "")
       const muni = String(row.municipality_name ?? "")
@@ -550,6 +600,15 @@ export const getExternalMuniHubCounts = unstable_cache(
   ["external-muni-hub-counts"],
   { revalidate: REVALIDATE },
 )
+
+/** 県×職種と同じ理由で、部分失敗はキャッシュに残さず、その場だけ空で縮退する。 */
+export const getExternalMuniHubCounts = async (): Promise<ExternalHubCounts> => {
+  try {
+    return await fetchExternalMuniHubCounts()
+  } catch {
+    return {}
+  }
+}
 
 /** 外部求人1件（詳細ページ用）。存在しなければ null。 */
 /**
