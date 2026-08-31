@@ -33,7 +33,7 @@ const REVALIDATE = 3600
  * 応募の社内通知にだけ実名が要るため、それは getExternalCompanyName がサーバー側で別取得する。
  */
 const SELECT_COLUMNS = [
-  "source", "source_id", "title", "company_name", "prefecture", "municipality_name", "address",
+  "source", "source_id", "title", "title_full", "company_name", "prefecture", "municipality_name", "address",
   "job_category", "employment_type", "salary_kind", "salary_min", "salary_max",
   "salary_raw", "work_hours", "description",
 ].join(",")
@@ -115,7 +115,11 @@ function mapRow(r: Record<string, unknown>): ExternalJob {
     sourceName: String(r.source_name ?? ""),
     sourceUrl: str(r.source_url),
     hwOffice: str(r.hw_office),
-    title: redact(str(r.title), company),
+    // 一覧ページ由来の title は転載元が20字で切り詰めており、30,716件中10,771件(35.1%)が
+    // ちょうど20字で意味が途中で切れていた（「…タクシー運転手／６０歳以」）。
+    // 詳細ページの h1 から取り直した title_full があればそちらを使う。
+    // 未取得の求人では NULL なので従来の title に落ちる（段階的バックフィル中のため）。
+    title: redact(str(r.title_full) || str(r.title), company),
     companyName: undefined,
     prefecture: pref,
     municipalityName: muni,
