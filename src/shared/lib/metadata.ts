@@ -326,16 +326,34 @@ const wageUnitLabel = (values?: string[]): string => {
   return v && WAGE_UNIT_MAP[v] ? v : '月給'
 }
 
-/** prefecture/municipality 参照が無い場合に addressPrefMuni から都道府県・市区町村を抽出 */
+/**
+ * addressPrefMuni から都道府県・市区町村・町名を抽出する。
+ *
+ * town（市区町村より後ろの残り＝大字・町名）まで返すのは JobPosting の streetAddress のため。
+ * addressPrefMuni は「宮城県仙台市若林区卸町」のように町名まで入っており、
+ * 番地は別フィールド(addressLine)にある。町名を捨てて番地だけを streetAddress にすると
+ * 「5-1-10」のような住所として成立しない値になり、Search Console が
+ * 「項目 streetAddress がありません（jobLocation.address に含まれる）」を出す。
+ * 実測(2026-09-01 無作為20件): 85%が番地のみで町名が欠落していた。
+ */
 export const parseAddressPrefMuni = (
   s?: string,
-): { region?: string; locality?: string } => {
+): { region?: string; locality?: string; town?: string } => {
   if (!s) return {}
   // 非貪欲 [都道府県] は「京都府」を「京都」(京+都)で誤停止させる（都道府県中『京都府』は
   // 手前に『都』を含む唯一の例外）。特殊4県を明示し、残り43県は『.+?県』で受ける。
   const m = s.match(/^(北海道|東京都|京都府|大阪府|.+?県)((?:.+?郡)?.+?[市区町村])?/)
   if (!m) return {}
-  return { region: m[1], locality: m[2] }
+  // 政令市は「仙台市若林区」のように市のあとに区が続く。上の正規表現は非貪欲なので
+  // 「仙台市」で止まる。区が続くならそこまでを locality に含める。
+  let locality = m[2]
+  let rest = s.slice((m[1] ?? '').length + (locality ?? '').length)
+  const ward = rest.match(/^(.+?区)/)
+  if (locality && /市$/.test(locality) && ward) {
+    locality += ward[1]
+    rest = rest.slice(ward[1].length)
+  }
+  return { region: m[1], locality, town: rest || undefined }
 }
 
 /** HTML 特殊文字をエスケープ */
@@ -413,8 +431,11 @@ export const generateJobPostingStructuredData = (job: JobDetail) => {
     ).toISOString()
   }
 
+  // streetAddress は「町名＋番地＋建物」で1つの住所として成立させる。
+  // 町名(parsed.town)を落とすと「5-1-10」だけになり、Search Console が
+  // 「項目 streetAddress がありません（jobLocation.address に含まれる）」を出す。
   const streetAddress =
-    [job.addressLine, job.addressBuilding].filter(Boolean).join(' ') || undefined
+    [parsed.town, job.addressLine, job.addressBuilding].filter(Boolean).join(' ') || undefined
 
   return {
     '@context': 'https://schema.org',
