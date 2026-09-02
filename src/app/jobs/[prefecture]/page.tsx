@@ -122,7 +122,13 @@ export default async function Page({ params }: Props) {
   // 県ハブは職種が定まらないので、その県で在庫が最も多い職種の記事を出す。
   // catsInKen は在庫件数の降順に並んでいるので先頭から拾えばよい。
   // 記事が引けない職種はスキップし、最大3本まで（県×職種ハブと同じ本数に揃える）。
-  const relatedArticles = (
+  //
+  // ⚠️ 同じ記事が2枚並びうるので href で重複を除く。理由は2つ:
+  //   1. car-mechanic と bike-mechanic は**同一キーワード「整備士」**を引く
+  //   2. taxi-driver と hire-driver の1本目が現時点で同一記事（hire-vs-taxi-difference）
+  // 今の在庫では 0/47県で起きないが、在庫は週次で入れ替わるので必ずいつか当たる。
+  // 重複すると HubPage の key={a.href} が React のキー重複になる。
+  const relatedArticlesRaw = (
     await Promise.all(
       rankedCats.slice(0, 3).map(async ({ cat }) => {
         const kw = hubArticleKeyword(cat.slug)
@@ -137,6 +143,9 @@ export default async function Page({ params }: Props) {
       }),
     )
   ).flat()
+  const relatedArticles = relatedArticlesRaw.filter(
+    (a, i) => relatedArticlesRaw.findIndex((b) => b.href === a.href) === i,
+  )
 
   return (
     <HubPage
