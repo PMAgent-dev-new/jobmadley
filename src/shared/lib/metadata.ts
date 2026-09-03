@@ -346,14 +346,18 @@ export const parseAddressPrefMuni = (
   if (!m) return {}
   // 政令市は「仙台市若林区」のように市のあとに区が続く。上の正規表現は非貪欲なので
   // 「仙台市」で止まる。区が続くならそこまでを locality に含める。
-  let locality = m[2]
-  let rest = s.slice((m[1] ?? '').length + (locality ?? '').length)
-  const ward = rest.match(/^(.+?区)/)
+  //
+  // ⚠ 入力には「大阪府 枚方市 北中振」「北海道 札幌市 手稲区」のように空白区切りの表記が
+  //   混じる（実データ）。正規表現が空白ごと拾うため、trim しないと
+  //   locality が "枚方市"、town が " 北中振" となり streetAddress が空白で始まる。
+  let locality = m[2]?.trim()
+  let rest = s.slice((m[1] ?? '').length + (m[2] ?? '').length)
+  const ward = rest.match(/^[\s　]*(.+?区)/)
   if (locality && /市$/.test(locality) && ward) {
-    locality += ward[1]
-    rest = rest.slice(ward[1].length)
+    locality += ward[1].trim()
+    rest = rest.slice(ward[0].length)
   }
-  return { region: m[1], locality, town: rest || undefined }
+  return { region: m[1]?.trim(), locality, town: rest.trim() || undefined }
 }
 
 /** HTML 特殊文字をエスケープ */
@@ -434,8 +438,13 @@ export const generateJobPostingStructuredData = (job: JobDetail) => {
   // streetAddress は「町名＋番地＋建物」で1つの住所として成立させる。
   // 町名(parsed.town)を落とすと「5-1-10」だけになり、Search Console が
   // 「項目 streetAddress がありません（jobLocation.address に含まれる）」を出す。
+  // trim してから連結する。空要素や前後の空白が混じると
+  // " 北中振 2004-10-20" のように空白で始まる住所になる。
   const streetAddress =
-    [parsed.town, job.addressLine, job.addressBuilding].filter(Boolean).join(' ') || undefined
+    [parsed.town, job.addressLine, job.addressBuilding]
+      .map((v) => v?.trim())
+      .filter(Boolean)
+      .join(' ') || undefined
 
   return {
     '@context': 'https://schema.org',
