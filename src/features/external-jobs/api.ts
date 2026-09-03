@@ -49,18 +49,61 @@ const companyCore = (name?: string): string => {
   return c.length >= 2 ? c : ""
 }
 
-/** 本文中に現れる社名を伏せる。表記ゆれ（社名内の空白）に対応するため空白を挟んだ形も消す。 */
+const CORP_WORD = /(株式会社|有限会社|合同会社|合資会社|合名会社|\(株\)|（株）|\(有\)|（有）)/
+
+/**
+ * 括弧で囲まれたブランド名・地域名を落とした中核。
+ * 求人票のタイトルは登録社名と表記が違うことが多い:
+ *   「車検のコバック」 株式会社リューツー → タイトルは「株式会社リューツー」
+ *   株式会社ツクイ（長野）              → タイトルは「ツクイ松本」
+ * companyCore だけでは括弧の中身が残って一致せず、社名がそのまま表示されていた。
+ * 3文字未満は誤爆するので対象にしない。
+ */
+const companyCoreWithoutBrackets = (name?: string): string => {
+  const c = (name ?? "")
+    .replace(/[「『（(\[][^」』）)\]]{1,20}[」』）)\]]/g, "")
+    .replace(/(株式会社|有限会社|合同会社|合資会社|合名会社|\(株\)|（株）|\(有\)|（有）)/g, "")
+    .replace(/[\s　]/g, "")
+  return c.length >= 3 ? c : ""
+}
+
+/**
+ * 法人格語に**隣接**する固有名。登録社名と照合できない表記ゆれや、
+ * 勤務先として書かれた別会社（「日本海水（株）構内」等）の受け皿。
+ *
+ * ⚠️ 法人格語との間に空白を挟ませないこと。挟ませると
+ * 「自動車整備士 株式会社リューツー」で**職種名まで巻き込んで伏せる**（実データで確認）。
+ * ⚠️ 後株を先に処理すること。前株を先にすると「日本海水（株）構内」で
+ * 「（株）構内」を掴み、**社名を残したまま普通名詞「構内」を伏せる**（実データで確認）。
+ */
+const CORP_NAME = "[^\\s　（）()／/、。・\\[\\]【】]{2,12}"
+const CORP_SUFFIXED = new RegExp(CORP_NAME + CORP_WORD.source, "g")
+const CORP_PREFIXED = new RegExp(CORP_WORD.source + CORP_NAME, "g")
+
+/**
+ * 本文中に現れる社名を伏せる。表記ゆれ（社名内の空白）に対応するため空白を挟んだ形も消す。
+ *
+ * 実測（2026-09-02・掲載中30,716件）: この処理を通した後もタイトルに社名が残る行が26件あった。
+ * 原因は登録社名と求人票の表記が違うこと（括弧付きブランド・登録名の方が長い・別会社）。
+ * 出典非表示の運用方針に対する漏れなので、下の3段で塞ぐ。
+ */
 const redact = (text: string | undefined, name?: string): string | undefined => {
   if (!text) return text
   let out = text
   const full = (name ?? "").trim()
-  const core = companyCore(name)
-  for (const n of [full, core].filter((x) => x.length >= 2)) {
+  for (const n of [full, companyCore(name), companyCoreWithoutBrackets(name)].filter((x) => x.length >= 2)) {
     const pat = n.split("").map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s　]*")
     out = out.replace(new RegExp(pat, "g"), "非公開")
   }
+  out = out.replace(CORP_SUFFIXED, "非公開").replace(CORP_PREFIXED, "非公開")
+  // 「非公開（株）」のように孤立した法人格語を掃除する
+  out = out
+    .replace(new RegExp("非公開[\\s　]*" + CORP_WORD.source, "g"), "非公開")
+    .replace(new RegExp(CORP_WORD.source + "[\\s　]*非公開", "g"), "非公開")
   return out.replace(/(非公開[\s　]*){2,}/g, "非公開")
 }
+
+export const __testing = { redact, companyCore, companyCoreWithoutBrackets }
 
 /**
  * 自社ハブの職種 slug → 外部の job_category 名。複数の外部カテゴリを1ハブに合流させる
