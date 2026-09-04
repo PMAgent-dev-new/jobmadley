@@ -76,7 +76,9 @@ const companyCoreWithoutBrackets = (name?: string): string => {
  * ⚠️ 後株を先に処理すること。前株を先にすると「日本海水（株）構内」で
  * 「（株）構内」を掴み、**社名を残したまま普通名詞「構内」を伏せる**（実データで確認）。
  */
-const CORP_NAME = "[^\\s　（）()／/、。・\\[\\]【】]{2,12}"
+// ⚠️ 記号・鉤括弧を必ず除外する。除外が甘いと「〜会社「株式会社イマギイレ」」で
+//    `会社「株式会社` を社名と誤認し、**社名を残したまま前の文脈を食う**（実データで確認）。
+const CORP_NAME = "[^\\s　（）()／/、。・\\[\\]【】「」『』：:！!？?※★☆◆◇■□●○◎▲△▼▽〜～＊*＜＞<>；;，,＆&〒]{2,12}"
 const CORP_SUFFIXED = new RegExp(CORP_NAME + CORP_WORD.source, "g")
 const CORP_PREFIXED = new RegExp(CORP_WORD.source + CORP_NAME, "g")
 
@@ -87,7 +89,32 @@ const CORP_PREFIXED = new RegExp(CORP_WORD.source + CORP_NAME, "g")
  * 原因は登録社名と求人票の表記が違うこと（括弧付きブランド・登録名の方が長い・別会社）。
  * 出典非表示の運用方針に対する漏れなので、下の3段で塞ぐ。
  */
-const redact = (text: string | undefined, name?: string): string | undefined => {
+const cleanupOrphanCorpWord = (text: string): string =>
+  text
+    .replace(new RegExp("非公開[\\s　]*" + CORP_WORD.source, "g"), "非公開")
+    .replace(new RegExp(CORP_WORD.source + "[\\s　]*非公開", "g"), "非公開")
+
+/**
+ * 本文中に現れる社名を伏せる。表記ゆれ（社名内の空白）に対応するため空白を挟んだ形も消す。
+ *
+ * @param corpFallback 登録社名と照合できないときに「法人格語＋隣接語」を伏せるか。
+ *
+ * ⚠️ **タイトルにだけ true を渡すこと。** description のような地の文に掛けてはいけない。
+ * 日本語には語の区切りに空白が無いので、`CORP_NAME` の {2,12} が「社名」ではなく
+ * **法人格語の前後12文字の地の文**を掴む。本番実測で250行が壊れていた:
+ *
+ *   株式会社三井住友銀行の役員車や部長車の運転  →  非公開長車の運転
+ *   ◆６０歳以上歓迎！◇（有）丸重にて          →  非公開にて（年齢条件が消える）
+ *   スズキ株式会社の車両を整備します            →  非公開の車両を整備します
+ *
+ * 社名が漏れることより、求職者が**職種・勤務地・条件を読めなくなる**方が実害が大きい。
+ * タイトルは「職種／社名」のように区切られた短文なので、この誤爆が起きにくい。
+ */
+const redact = (
+  text: string | undefined,
+  name?: string,
+  { corpFallback = false }: { corpFallback?: boolean } = {},
+): string | undefined => {
   if (!text) return text
   let out = text
   const full = (name ?? "").trim()
@@ -95,11 +122,15 @@ const redact = (text: string | undefined, name?: string): string | undefined => 
     const pat = n.split("").map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s　]*")
     out = out.replace(new RegExp(pat, "g"), "非公開")
   }
-  out = out.replace(CORP_SUFFIXED, "非公開").replace(CORP_PREFIXED, "非公開")
-  // 「非公開（株）」のように孤立した法人格語を掃除する
-  out = out
-    .replace(new RegExp("非公開[\\s　]*" + CORP_WORD.source, "g"), "非公開")
-    .replace(new RegExp(CORP_WORD.source + "[\\s　]*非公開", "g"), "非公開")
+  // ⚠️ 孤立した法人格語の掃除は**フォールバックより先**に行う。
+  //    後にすると、名前照合で「非公開」になった隣の法人格語を起点にフォールバックが走り、
+  //    掃除で消えるはずだった語から前後の地の文を食う
+  //    （「株式会社非公開千歳支店での勤務と」がまるごと消えていた）。
+  out = cleanupOrphanCorpWord(out)
+  if (corpFallback) {
+    out = out.replace(CORP_SUFFIXED, "非公開").replace(CORP_PREFIXED, "非公開")
+    out = cleanupOrphanCorpWord(out)
+  }
   return out.replace(/(非公開[\s　]*){2,}/g, "非公開")
 }
 
@@ -162,7 +193,7 @@ function mapRow(r: Record<string, unknown>): ExternalJob {
     // ちょうど20字で意味が途中で切れていた（「…タクシー運転手／６０歳以」）。
     // 詳細ページの h1 から取り直した title_full があればそちらを使う。
     // 未取得の求人では NULL なので従来の title に落ちる（段階的バックフィル中のため）。
-    title: redact(str(r.title_full) || str(r.title), company),
+    title: redact(str(r.title_full) || str(r.title), company, { corpFallback: true }),
     companyName: undefined,
     prefecture: pref,
     municipalityName: muni,
