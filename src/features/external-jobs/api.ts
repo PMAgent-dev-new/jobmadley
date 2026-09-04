@@ -719,10 +719,42 @@ export const EXTERNAL_DETAIL_GROUPS: Array<{ group: string; items: Array<[string
     ["training", "研修制度"], ["smoking_policy", "受動喫煙対策"],
   ] },
   { group: "職場", items: [["employee_count", "従業員数"]] },
-  { group: "選考", items: [["selection_method", "選考方法"], ["application_docs", "応募書類"]] },
+  // ⚠️ application_docs は**表示しない**。実測（23,219件）で 23,114件（99.5%）に
+  //    「ハローワーク紹介状」が入り出典が露出し、598件に雇用主の住所（〒＋番地）、
+  //    382件に社名が載っていた。api.ts が自ら禁じている「番地で企業特定」がここで成立していた。
+  //    内容も「紹介状を郵送してください」という**直接応募の案内**で、
+  //    応募が当社フォームを通る運用と矛盾する。求職者が失う情報は無い。
+  { group: "選考", items: [["selection_method", "選考方法"]] },
 ]
 
 const DETAIL_COLUMNS = EXTERNAL_DETAIL_GROUPS.flatMap((g) => g.items.map(([c]) => c)).join(",")
+
+/** 出典（ハローワーク）を指す語。 */
+const SOURCE_WORDS = /(ハローワーク|公共職業安定所|職安)/
+
+/**
+ * 詳細項目を表示できる形にする。
+ *
+ * ⚠️ ここを通さないと、詳細ページは求人票の原文をそのまま出す。実測（23,219件）で
+ * 社名730件・出典への誘導文1,880件が求職者に見えていた。
+ *
+ * 1. **出典に触れている区切りを丸ごと落とす。** 「詳細はハローワーク窓口へ」のような
+ *    文は、出典を明かすうえに応募者を当社フォームの外へ誘導する。語だけ伏せると
+ *    「詳細は非公開窓口へ」という意味の通らない文が残るので、区切りごと消す。
+ * 2. **社名を伏せる。** ⚠️ corpFallback は使わない。詳細項目は地の文なので、
+ *    法人格語の前後12文字を食って職種・条件が消える（#111 で直した事故と同型）。
+ */
+export const sanitizeDetailValue = (value: string, company?: string): string => {
+  const kept = value
+    // 句点・全角スラッシュ・改行・【】ブロックの手前で区切る
+    // ⚠️ 箇条書きの記号も区切りに入れること。句点だけで切ると
+    //    「◆応募の際はハローワークから…」を含む塊に前の行が巻き込まれ、
+    //    「（マイクロバス、中型車、普通車を使用）」のような**必要な情報まで消える**（実測）。
+    .split(/(?<=。)|(?<=！)|(?<=？)|\n|(?=[【＊※◆◇○●■□▲△★☆＜〈・])|(?<=】)/)
+    .filter((seg) => !SOURCE_WORDS.test(seg))
+    .join("")
+  return (redact(kept, company) ?? "").replace(/[\s　]{2,}/g, " ").trim()
+}
 
 /** 詳細ページの項目を取得。未取得の求人では null（従来の表示に落ちるだけ）。 */
 export const getExternalJobDetail = async (
@@ -741,8 +773,13 @@ export const getExternalJobDetail = async (
   )
   const r = rows[0]
   if (!r) return null
+  const company = await getExternalCompanyName(source, sourceId)
   const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(r)) if (typeof v === "string" && v.trim()) out[k] = v
+  for (const [k, v] of Object.entries(r)) {
+    if (typeof v !== "string" || !v.trim()) continue
+    const cleaned = sanitizeDetailValue(v, company)
+    if (cleaned.trim()) out[k] = cleaned
+  }
   return Object.keys(out).length ? out : null
 }
 
