@@ -336,10 +336,33 @@ const wageUnitLabel = (values?: string[]): string => {
  * 「項目 streetAddress がありません（jobLocation.address に含まれる）」を出す。
  * 実測(2026-09-01 無作為20件): 85%が番地のみで町名が欠落していた。
  */
+/**
+ * 東京23区のうち、**その名前の区が東京にしか無い**もの。
+ *
+ * 中央区・港区・北区は政令指定都市にも同名の区があるため入れない
+ * （中央区は札幌/千葉/新潟/相模原/神戸/福岡/熊本、港区は大阪市/名古屋市、
+ *   北区は大阪/京都/神戸/名古屋/札幌/岡山/新潟/堺）。
+ * 曖昧なものを含めると、大阪の求人を東京都と宣言してしまう。
+ */
+const TOKYO_ONLY_WARDS = [
+  "千代田区", "新宿区", "文京区", "台東区", "墨田区", "江東区", "品川区", "目黒区",
+  "大田区", "世田谷区", "渋谷区", "中野区", "杉並区", "豊島区", "荒川区", "板橋区",
+  "練馬区", "足立区", "葛飾区", "江戸川区",
+] as const
+
 export const parseAddressPrefMuni = (
   s?: string,
 ): { region?: string; locality?: string; town?: string } => {
   if (!s) return {}
+  // 入稿の実データには「板橋区中丸町」のように**都道府県を省いた**住所が混じる。
+  // 下の正規表現は都道府県始まりを前提にしているため丸ごと失敗し、
+  // addressRegion / addressLocality が両方とも欠けた JobPosting が出ていた
+  // （GSCの「求人情報の構造化データで問題が検出されました」の正体・実測1件）。
+  // 東京にしか無い区名で始まる場合だけ、東京都を補って解釈する。
+  const tokyoWard = TOKYO_ONLY_WARDS.find((w) => s.startsWith(w))
+  if (tokyoWard) {
+    return { region: "東京都", locality: tokyoWard, town: s.slice(tokyoWard.length).trim() || undefined }
+  }
   // 非貪欲 [都道府県] は「京都府」を「京都」(京+都)で誤停止させる（都道府県中『京都府』は
   // 手前に『都』を含む唯一の例外）。特殊4県を明示し、残り43県は『.+?県』で受ける。
   const m = s.match(/^(北海道|東京都|京都府|大阪府|.+?県)((?:.+?郡)?.+?[市区町村])?/)
