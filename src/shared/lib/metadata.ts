@@ -161,8 +161,79 @@ export const generateSearchMetadata = (params: {
 // meta description 整形ヘルパー
 // =====================
 
-/** meta description の目安長。日本語SERPは全角120字前後で切られるため、この範囲に収める */
-const JOB_DESCRIPTION_MAX_LENGTH = 120
+/**
+ * meta description の表示幅の上限。
+ *
+ * 検索結果は文字数ではなく**表示幅**で切られる。全角=2・半角=1 で数えて
+ * だいたい 120〜140 が上限で、超えた分は「…」で落とされる。
+ * 日本語は1字=幅2なので、全角70字ぶん。
+ *
+ * 実測（2026-09-06 本番）では全ページが超過していた:
+ *   / 176 ／ /jobs/tokyo 268 ／ /jobs/osaka 264 ／ /jobs/tokyo/taxi-driver 222
+ * ハブは本文のリード文（100〜130字）をそのまま description に流していたため、
+ * 検索結果では後半が丸ごと表示されていなかった。
+ *
+ * ⚠️ 求人詳細側の上限はかつて 120「文字」で持たれていた。
+ *    日本語は1字=幅2なので実際には幅240＝上限のほぼ倍だった。
+ *    上限は必ず幅で持ち、字数が要るときはここから逆算すること。
+ */
+export const DESCRIPTION_MAX_WIDTH = 140
+
+/**
+ * 全角=2・半角=1 の表示幅。検索結果の切り詰めはこの単位で起きる。
+ *
+ * ⚠️ CJKの範囲（0x2E80〜）だけを見ると「※」「★」「…」「①」を半角と数えてしまい、
+ *    記号の多い本文で上限をわずかに超える。逆に半角カナ（U+FF61〜FF9F）は
+ *    全角の範囲に見えるが幅1なので、全角英数（U+FF00〜FF60）と分けて扱う。
+ */
+export const displayWidth = (text: string): number =>
+  Array.from(text).reduce((w, c) => {
+    const cp = c.codePointAt(0)!
+    const wide =
+      (cp >= 0x1100 && cp <= 0x115f) || // ハングル字母
+      cp === 0x2026 || cp === 0x203b || // … ※
+      (cp >= 0x2460 && cp <= 0x24ff) || // ①などの囲み数字
+      (cp >= 0x25a0 && cp <= 0x27bf) || // ■ ★ ▲ などの記号・装飾
+      (cp >= 0x2e80 && cp <= 0xa4cf) || // CJK・かな・部首
+      (cp >= 0xac00 && cp <= 0xd7a3) || // ハングル音節
+      (cp >= 0xf900 && cp <= 0xfaff) || // CJK互換漢字
+      (cp >= 0xfe30 && cp <= 0xfe6f) || // CJK互換記号
+      (cp >= 0xff00 && cp <= 0xff60) || // 全角英数・記号（半角カナは含まない）
+      (cp >= 0xffe0 && cp <= 0xffe6) || // 全角通貨記号
+      (cp >= 0x1f300 && cp <= 0x1faff)  // 絵文字
+    return w + (wide ? 2 : 1)
+  }, 0)
+
+/**
+ * 表示幅の上限に収まるよう description を整える。
+ * 収まっていればそのまま返す。超えていれば、幅から逆算した字数で
+ * truncateForDescription に渡し、文の区切りで切る。
+ */
+export const fitDescription = (
+  text: string,
+  maxWidth: number = DESCRIPTION_MAX_WIDTH,
+): string => {
+  const trimmed = text.replace(/\s+/g, ' ').trim()
+  if (displayWidth(trimmed) <= maxWidth) return trimmed
+  // 幅→字数は文字ごとに違うので、幅を数えながら入るところまで取る
+  let width = 0
+  let chars = 0
+  for (const c of Array.from(trimmed)) {
+    const w = displayWidth(c)
+    if (width + w > maxWidth) break
+    width += w
+    chars += 1
+  }
+  // ⚠️ 字数を渡すだけでは幅を保証できない。
+  //    truncateForDescription は末尾の「…」に**1文字**を見込むが、「…」の幅は2。
+  //    半角だけの本文では 139字（幅139）＋「…」（幅2）＝幅141 と1だけ溢れていた。
+  //    内部の見積もりに依存せず、出来上がりの幅で確かめて詰める。
+  for (let n = chars; n >= 2; n--) {
+    const out = truncateForDescription(trimmed, n)
+    if (displayWidth(out) <= maxWidth) return out
+  }
+  return ''
+}
 
 /**
  * CMS本文を meta description 用の1行テキストへ整形する。
@@ -183,23 +254,35 @@ const truncateForDescription = (text: string, maxLength: number): string => {
 
   // 末尾の「…」1字ぶんを空けて候補を切り出す
   const head = chars.slice(0, maxLength - 1).join('')
-  // 極端に短く切れるのを避けるため、切断位置は候補の後半にある場合のみ採用する
-  const minCut = head.length / 2
+  // 句点は候補の35%以降にあれば採用する。
+  // 半分（50%）を条件にしていたときは、ハブのリード文218本のうち91本が
+  // 語の途中で「…」に落ちていた。35%まで下げると完結する文が127→171本になる。
+  // そのぶん予算の余りは平均25→36に増えるが、meta description は順位の要因ではなく
+  // 検索結果での読みやすさ＝CTRのためのものなので、文が完結している方を優先する。
   const sentenceEnd = Math.max(
     head.lastIndexOf('。'),
     head.lastIndexOf('！'),
     head.lastIndexOf('？'),
   )
-  if (sentenceEnd >= minCut) return head.slice(0, sentenceEnd + 1)
+  if (sentenceEnd >= head.length * 0.35) return head.slice(0, sentenceEnd + 1)
 
+  // 句点が無い／前すぎる場合は節の区切りで切る。こちらは半分以降を条件にする
+  // （読点だけで極端に短く切ると、何のページか分からなくなるため）。
+  const minCut = head.length / 2
+
+  // ⚠️ 半角スペースを切断点にしない。
+  // 「RIDE JOB」の間の半角スペースを拾い、ブランド名が「…RIDE…」で切れていた
+  // （/jobs/category/taxi-driver ほか6ページで再現）。日本語の文では半角スペースは
+  // 文の区切りではなく、ほぼ英字の語間にしか現れないので、切断点として役に立たない。
   const softBreak = Math.max(
     head.lastIndexOf('、'),
     head.lastIndexOf('，'),
     head.lastIndexOf('）'),
-    head.lastIndexOf(' '),
+    head.lastIndexOf('】'),
+    head.lastIndexOf('・'),
   )
   const cut = softBreak >= minCut ? softBreak + 1 : head.length
-  return `${head.slice(0, cut).replace(/[、，\s]+$/, '')}…`
+  return `${head.slice(0, cut).replace(/[、，・\s]+$/, '')}…`
 }
 
 /**
@@ -240,11 +323,17 @@ export const generateJobMetadata = (job: JobDetail): Metadata => {
   const descriptionPrefix = locationText
     ? `${locationText}の${job.jobCategory?.name || 'ドライバー'}求人。${salaryText}。`
     : `${job.jobCategory?.name || 'ドライバー'}求人。${salaryText}。`
+  // 地域・職種・給与の定型部分が使う幅を先に引き、残りをCMS本文に割り当てる。
+  // 幅→字数は文字ごとに違うため、残り幅を全角（幅2）で割った字数を上限にする。
+  // 全角前提で見積もるので、半角混じりの本文では余りが出る。
+  // 溢れるよりは短い方が安全（溢れた分は検索結果に出ない）。
+  const remainingWidth = Math.max(0, DESCRIPTION_MAX_WIDTH - displayWidth(descriptionPrefix))
   const appeal = truncateForDescription(
     normalizeDescriptionSource(job.descriptionAppeal || job.descriptionWork),
-    JOB_DESCRIPTION_MAX_LENGTH - Array.from(descriptionPrefix).length,
+    Math.floor(remainingWidth / 2),
   )
-  const description = `${descriptionPrefix}${appeal || '詳細情報をご確認ください。'}`
+  // 定型部分だけで上限を超える求人（長い自治体名＋給与レンジ）に備えて最後に丸める
+  const description = fitDescription(`${descriptionPrefix}${appeal || '詳細情報をご確認ください。'}`)
   
   const imageUrl = job.images?.[0]?.url || job.imageUrl || OGP_IMAGE
   
@@ -684,7 +773,11 @@ export const generateHubMetadata = (params: {
   description: string
   canonicalPath: string
 }): Metadata => {
-  const { title, description, canonicalPath } = params
+  const { title, canonicalPath } = params
+  // 呼び出し側は本文のリード文をそのまま渡してくる（100〜130字）。
+  // 検索結果に出るのは幅140までなので、ここで必ず丸める。
+  // 各ハブの generateMetadata に散らさず1箇所で効かせる。
+  const description = fitDescription(params.description)
   return {
     title,
     description,
