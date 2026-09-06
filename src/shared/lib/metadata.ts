@@ -139,7 +139,6 @@ export const generateSearchMetadata = (params: {
 // meta description 整形ヘルパー
 // =====================
 
-/** meta description の目安長。日本語SERPは全角120字前後で切られるため、この範囲に収める */
 /**
  * meta description の表示幅の上限。
  *
@@ -151,12 +150,37 @@ export const generateSearchMetadata = (params: {
  *   / 176 ／ /jobs/tokyo 268 ／ /jobs/osaka 264 ／ /jobs/tokyo/taxi-driver 222
  * ハブは本文のリード文（100〜130字）をそのまま description に流していたため、
  * 検索結果では後半が丸ごと表示されていなかった。
+ *
+ * ⚠️ 求人詳細側の上限はかつて 120「文字」で持たれていた。
+ *    日本語は1字=幅2なので実際には幅240＝上限のほぼ倍だった。
+ *    上限は必ず幅で持ち、字数が要るときはここから逆算すること。
  */
 export const DESCRIPTION_MAX_WIDTH = 140
 
-/** 全角=2・半角=1 の表示幅。検索結果の切り詰めはこの単位で起きる。 */
+/**
+ * 全角=2・半角=1 の表示幅。検索結果の切り詰めはこの単位で起きる。
+ *
+ * ⚠️ CJKの範囲（0x2E80〜）だけを見ると「※」「★」「…」「①」を半角と数えてしまい、
+ *    記号の多い本文で上限をわずかに超える。逆に半角カナ（U+FF61〜FF9F）は
+ *    全角の範囲に見えるが幅1なので、全角英数（U+FF00〜FF60）と分けて扱う。
+ */
 export const displayWidth = (text: string): number =>
-  Array.from(text).reduce((w, c) => w + (c.codePointAt(0)! > 0x2e80 ? 2 : 1), 0)
+  Array.from(text).reduce((w, c) => {
+    const cp = c.codePointAt(0)!
+    const wide =
+      (cp >= 0x1100 && cp <= 0x115f) || // ハングル字母
+      cp === 0x2026 || cp === 0x203b || // … ※
+      (cp >= 0x2460 && cp <= 0x24ff) || // ①などの囲み数字
+      (cp >= 0x25a0 && cp <= 0x27bf) || // ■ ★ ▲ などの記号・装飾
+      (cp >= 0x2e80 && cp <= 0xa4cf) || // CJK・かな・部首
+      (cp >= 0xac00 && cp <= 0xd7a3) || // ハングル音節
+      (cp >= 0xf900 && cp <= 0xfaff) || // CJK互換漢字
+      (cp >= 0xfe30 && cp <= 0xfe6f) || // CJK互換記号
+      (cp >= 0xff00 && cp <= 0xff60) || // 全角英数・記号（半角カナは含まない）
+      (cp >= 0xffe0 && cp <= 0xffe6) || // 全角通貨記号
+      (cp >= 0x1f300 && cp <= 0x1faff)  // 絵文字
+    return w + (wide ? 2 : 1)
+  }, 0)
 
 /**
  * 表示幅の上限に収まるよう description を整える。
@@ -173,19 +197,21 @@ export const fitDescription = (
   let width = 0
   let chars = 0
   for (const c of Array.from(trimmed)) {
-    const w = c.codePointAt(0)! > 0x2e80 ? 2 : 1
+    const w = displayWidth(c)
     if (width + w > maxWidth) break
     width += w
     chars += 1
   }
-  return truncateForDescription(trimmed, chars)
+  // ⚠️ 字数を渡すだけでは幅を保証できない。
+  //    truncateForDescription は末尾の「…」に**1文字**を見込むが、「…」の幅は2。
+  //    半角だけの本文では 139字（幅139）＋「…」（幅2）＝幅141 と1だけ溢れていた。
+  //    内部の見積もりに依存せず、出来上がりの幅で確かめて詰める。
+  for (let n = chars; n >= 2; n--) {
+    const out = truncateForDescription(trimmed, n)
+    if (displayWidth(out) <= maxWidth) return out
+  }
+  return ''
 }
-
-/**
- * ⚠️ かつてここは 120「文字」だった。日本語は1字=幅2なので実際には幅240で、
- * 検索結果の上限（幅140）のほぼ倍。後半が丸ごと表示されていなかった。
- * 上限は DESCRIPTION_MAX_WIDTH（幅）で持ち、字数はそこから逆算する。
- */
 
 /**
  * CMS本文を meta description 用の1行テキストへ整形する。

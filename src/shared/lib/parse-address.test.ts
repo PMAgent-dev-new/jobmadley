@@ -101,3 +101,22 @@ test('上限を明示できる（OGPなど別の予算で使う場合）', () =>
   const out = fitDescription('東京都のドライバー求人が幅広く集まります。整備士も歓迎です。', 20)
   assert.ok(displayWidth(out) <= 20, `幅超過: ${displayWidth(out)}`)
 })
+
+test('★全角記号を半角と数えない（※ ★ … ①）', () => {
+  // CJKの範囲だけを見ていたときは、これらを幅1と数えて上限をわずかに超えていた
+  assert.equal(displayWidth('※'), 2)
+  assert.equal(displayWidth('★'), 2)
+  assert.equal(displayWidth('…'), 2)
+  assert.equal(displayWidth('①'), 2)
+  assert.equal(displayWidth('Ａ'), 2)
+  assert.equal(displayWidth('🚕'), 2)
+})
+
+test('半角カナは幅1（全角英数の範囲に紛れさせない）', () => {
+  assert.equal(displayWidth('ｱｲｳ'), 3)
+})
+
+test('記号だらけの本文でも上限を超えない', () => {
+  assert.ok(displayWidth(fitDescription('※'.repeat(200))) <= 140)
+  assert.ok(displayWidth(fitDescription('★☆■□'.repeat(50))) <= 140)
+})
