@@ -9,10 +9,25 @@ import { normalizeCmsText } from '@/shared/lib/utils'
 // ブランド名（titleテンプレートのサフィックス）。旧値は説明文入り全角38字で、
 // 求人詳細のtitleが60〜80字になりSERPで切断・書き換えが発生していた（基準28〜32字）。
 export const SITE_NAME = 'ライドジョブ'
-// トップページ専用のフルタイトル。主要KW（タクシー転職・求人）を先頭に置く
+// トップページ専用のフルタイトル。主要KWを先頭に置く
 // （GSC実測: 「タクシー 転職/求人」系クエリで9〜13位・クリック0のため、ブランド先頭→KW先頭に変更）
-export const TOP_TITLE = 'タクシードライバー・自動車整備士の求人・転職サイト｜ライドジョブ'
-export const SITE_DESCRIPTION = 'タクシードライバー・自動車整備士・ドライバー職の求人・転職サイト「ライドジョブ」。未経験歓迎・高収入・寮完備などの条件から探せて、専任アドバイザーが転職を無料でサポートします。'
+//
+// ⚠️ 全角30〜32字（表示幅60〜64）がSERPの表示上限。旧値は32字＝上限ぎりぎりで、
+//    環境によって末尾が切れていた。本値は28字＝幅56。
+//
+// 職種の選び方: 掲載件数（2026-09-04実測）はハブに合流する転載求人を含めて
+//   トラック9,074 / 整備士8,765 / 配送5,671 / 送迎4,034 / バス2,317 / タクシー1,641。
+// 紹介できる自社求人だけで見ると 整備士451 / タクシー377 / バイク整備士302 /
+// トラック83 で、順位が入れ替わる。どちらの見方でも上位に入るこの3職種を残した。
+//
+// ⚠️ 「ドライバー」を落とさないこと。
+//    「タクシー・トラック・整備士」と短縮した案は幅58で収まるが、
+//    ドライバー求人サイトのカテゴリ上位語である「ドライバー」がtitleから消える。
+//    「トラックドライバー」と書けば、トラックとドライバーを1語で両立できる。
+export const TOP_TITLE = 'タクシー・トラックドライバー・整備士の求人｜ライドジョブ'
+// ⚠️ 全角60〜70字が表示上限。旧値は88字で、末尾の「専任アドバイザーが無料でサポート」という
+//    差別化の部分がSERPで切れていた（実機で確認）。
+export const SITE_DESCRIPTION = 'タクシー・トラック・整備士など、街を支える仕事の求人サイト。未経験歓迎・高収入・寮完備から探せて、専任アドバイザーが無料でサポートします。'
 export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://ridejob.jp'
 export const OPERATOR_NAME = '株式会社PM Agent'
 const OGP_IMAGE = '/images/OGP.png'
@@ -27,13 +42,17 @@ export const baseMetadata: Metadata = {
     default: TOP_TITLE,
   },
   description: SITE_DESCRIPTION,
+  // ⚠️ 掲載している職種だけを並べること。在庫の無い職種を書いても順位には効かず、
+  //    社内で「その職種を扱っている」と誤解される元になる。
+  //    掲載件数（2026-09-04）: トラック9,074 / 整備士8,765 / 配送5,671 / 送迎4,034 / バス2,317 / タクシー1,641
   keywords: [
     'タクシー運転手',
     'タクシードライバー',
+    'トラックドライバー',
     '自動車整備士',
     '整備士',
-    'フードデリバリー',
-    'デリバリー',
+    'バス運転手',
+    '配送ドライバー',
     'ドライバー求人',
     '転職',
     '求人',
@@ -97,6 +116,9 @@ export const generateHomeMetadata = (): Metadata => ({
   openGraph: {
     title: TOP_TITLE,
     description: SITE_DESCRIPTION,
+    // ⚠️ siteName を書くこと。ルートの metadata では設定しているが、
+    //    ここで openGraph を丸ごと上書きするため、書かないとTOPだけ og:site_name が消える。
+    siteName: SITE_NAME,
     url: '/',
     images: [OGP_IMAGE],
   },
@@ -503,6 +525,37 @@ export const buildJobDescriptionHtml = (job: JobDetail): string => {
 const VALID_THROUGH_FALLBACK_DAYS = 30
 
 /**
+ * 生の住所から、実際に採用した都道府県名・市区町村名を前方から取り除いて町名を得る。
+ * 空白（半角・全角）は区切りとして無視する。
+ * 取り除けなかった場合は undefined を返す（呼び出し側でパーサの結果に落とす）。
+ */
+export const stripAddressPrefix = (
+  raw?: string,
+  region?: string,
+  locality?: string,
+): string | undefined => {
+  if (!raw) return undefined
+  // ⚠️ region も locality も無いときに raw をそのまま返さないこと。
+  //    ループが空回りして「取り除けなかった」ことに気づけず、
+  //    住所全体が町名として streetAddress に載る（'住所未定' → '住所未定 5-1-10'）。
+  if (!region && !locality) return undefined
+  const squash = (v: string) => v.replace(/[\s　]/g, '')
+  let rest = raw
+  for (const part of [region, locality]) {
+    if (!part) continue
+    // 空白を挟んだ表記（「三重県 四日市市 八田」）にも当てるため、
+    // 1文字ずつ「空白を挟んでもよい」形で先頭から照合する
+    const pattern = new RegExp(
+      '^[\\s　]*' + squash(part).split('').map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s　]*'),
+    )
+    const m = rest.match(pattern)
+    if (!m) return undefined
+    rest = rest.slice(m[0].length)
+  }
+  return rest.trim() || undefined
+}
+
+/**
  * 構造化データの生成 (Google JobPosting 準拠)
  * @see https://developers.google.com/search/docs/appearance/structured-data/job-posting
  *
@@ -552,8 +605,24 @@ export const generateJobPostingStructuredData = (job: JobDetail) => {
   // 「項目 streetAddress がありません（jobLocation.address に含まれる）」を出す。
   // trim してから連結する。空要素や前後の空白が混じると
   // " 北中振 2004-10-20" のように空白で始まる住所になる。
+  // ⚠️ 町名は parsed.town をそのまま使わない。
+  //
+  // locality はマスタ（job.municipality）で上書きしているのに、town だけ
+  // パーサの結果を使っていたため、両者が食い違うと住所が壊れていた。
+  // 全1,491件の実測（2026-09-06）で26件:
+  //
+  //   三重県 四日市市 八田       → 町名が「市 八田」  （21件・文字が重複）
+  //     パーサが空白を食って「四日市」で停止し、残りが「市 八田」になる。
+  //     マスタが locality を「四日市市」に直しても、town は直らない。
+  //   兵庫県 姫路市 飾磨区 今在家 → 町名が「今在家」  （5件・文字が欠落）
+  //     政令市でない姫路市の「飾磨区」を区として食べてしまい、町名から消える。
+  //
+  // 実際に採用した region と locality を、生の住所から前方一致で取り除いた残りを町名にする。
+  // こうすれば locality をどう補正しても町名と必ず整合する。
+  const town = stripAddressPrefix(job.addressPrefMuni, addressRegion, addressLocality) ?? parsed.town
+
   const streetAddress =
-    [parsed.town, job.addressLine, job.addressBuilding]
+    [town, job.addressLine, job.addressBuilding]
       .map((v) => v?.trim())
       .filter(Boolean)
       .join(' ') || undefined
