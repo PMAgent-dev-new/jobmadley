@@ -85,6 +85,19 @@
   font-size: clamp(44px, 6.6vw, 96px);
   color: var(--blue-800);
 }
+.h1sub {
+  /* H1に含める主題。キャッチコピーより小さく、リード文より強い扱いにする。
+     視覚的に隠さないこと（隠しテキストは検索エンジンに操作と見なされうる）。 */
+  display: block;
+  margin-top: 0.55em;
+  font-size: clamp(15px, 1.7vw, 21px);
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: var(--blue-800);
+  opacity: 0.78;
+}
+
 .ka {
   color: var(--orange);
   display: inline-block;

@@ -6,10 +6,13 @@ import Image from "next/image"
 import { Search, MapPin } from "lucide-react"
 import styles from "./comic-hero-section.module.css"
 
+// ⚠️ 押すと検索窓に入る語なので、**在庫のある職種だけ**を並べること。
+//    「フードデリバリー」は掲載求人が無く、押した人を0件の結果に着地させていた。
+//    掲載件数（2026-09-04）: トラック9,074 / 整備士8,765 / 配送5,671 / タクシー1,641
 const POPULAR_TAGS = [
   "タクシードライバー",
+  "トラックドライバー",
   "自動車整備士",
-  "フードデリバリー",
   "未経験OK",
   "高収入",
   "東京23区",
@@ -40,12 +43,17 @@ export default function ComicHeroSection() {
       <div className={styles.grid}>
         <div className={styles.copy}>
           <span className={styles.eyebrow}>⚡ 街を支える仕事の求人サイト</span>
+          {/* H1はページの主題を表す見出し。キャッチコピーだけだと、Googleにも読み手にも
+              何のサイトか伝わらない（旧: 「ガッ！と街を、動かせ。」のみで事業KWがゼロ、
+              TOPは平均30.4位）。コピーは主役のまま残し、主題を1行足す。
+              ⚠️ 視覚的に隠さないこと。隠しテキストは検索エンジンに操作と見なされうる。 */}
           <h1 className={styles.h1}>
             <span className={styles.ka}>ガッ！</span>と<br />
             <span className={styles.underline}>街を、動かせ</span>。
+            <span className={styles.h1sub}>タクシー・トラック・整備士の求人・転職</span>
           </h1>
           <p className={styles.lede}>
-            タクシードライバー、自動車整備士、フードデリバリー…
+            タクシードライバー、トラックドライバー、自動車整備士…
             街を支える仕事の求人を、ライオン社長が本気でマッチングします。
           </p>
 

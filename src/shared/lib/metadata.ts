@@ -9,10 +9,19 @@ import { normalizeCmsText } from '@/shared/lib/utils'
 // ブランド名（titleテンプレートのサフィックス）。旧値は説明文入り全角38字で、
 // 求人詳細のtitleが60〜80字になりSERPで切断・書き換えが発生していた（基準28〜32字）。
 export const SITE_NAME = 'ライドジョブ'
-// トップページ専用のフルタイトル。主要KW（タクシー転職・求人）を先頭に置く
+// トップページ専用のフルタイトル。主要KWを先頭に置く
 // （GSC実測: 「タクシー 転職/求人」系クエリで9〜13位・クリック0のため、ブランド先頭→KW先頭に変更）
-export const TOP_TITLE = 'タクシードライバー・自動車整備士の求人・転職サイト｜ライドジョブ'
-export const SITE_DESCRIPTION = 'タクシードライバー・自動車整備士・ドライバー職の求人・転職サイト「ライドジョブ」。未経験歓迎・高収入・寮完備などの条件から探せて、専任アドバイザーが転職を無料でサポートします。'
+//
+// ⚠️ 全角30〜32字（表示幅60〜64）がSERPの表示上限。旧値は32字＝上限ぎりぎりで、
+//    環境によって末尾が切れていた。
+// 在庫最大の職種を落とさないこと。2026-09-04実測の掲載件数は
+//   トラック9,074 / 整備士8,765 / 配送5,671 / 送迎4,034 / バス2,317 / タクシー1,641
+// で、旧値はサイト最大の在庫であるトラックを含んでいなかった。
+// 「タクシードライバー」→「タクシー」への短縮は、H1のサブ見出しとリード文で語を補っている。
+export const TOP_TITLE = 'タクシー・トラック・整備士の求人・転職サイト｜ライドジョブ'
+// ⚠️ 全角60〜70字が表示上限。旧値は88字で、末尾の「専任アドバイザーが無料でサポート」という
+//    差別化の部分がSERPで切れていた（実機で確認）。
+export const SITE_DESCRIPTION = 'タクシー・トラック・整備士など、街を支える仕事の求人サイト。未経験歓迎・高収入・寮完備から探せて、専任アドバイザーが無料でサポートします。'
 export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://ridejob.jp'
 export const OPERATOR_NAME = '株式会社PM Agent'
 const OGP_IMAGE = '/images/OGP.png'
@@ -27,13 +36,17 @@ export const baseMetadata: Metadata = {
     default: TOP_TITLE,
   },
   description: SITE_DESCRIPTION,
+  // ⚠️ 掲載している職種だけを並べること。在庫の無い職種を書いても順位には効かず、
+  //    社内で「その職種を扱っている」と誤解される元になる。
+  //    掲載件数（2026-09-04）: トラック9,074 / 整備士8,765 / 配送5,671 / 送迎4,034 / バス2,317 / タクシー1,641
   keywords: [
     'タクシー運転手',
     'タクシードライバー',
+    'トラックドライバー',
     '自動車整備士',
     '整備士',
-    'フードデリバリー',
-    'デリバリー',
+    'バス運転手',
+    '配送ドライバー',
     'ドライバー求人',
     '転職',
     '求人',
@@ -97,6 +110,9 @@ export const generateHomeMetadata = (): Metadata => ({
   openGraph: {
     title: TOP_TITLE,
     description: SITE_DESCRIPTION,
+    // ⚠️ siteName を書くこと。ルートの metadata では設定しているが、
+    //    ここで openGraph を丸ごと上書きするため、書かないとTOPだけ og:site_name が消える。
+    siteName: SITE_NAME,
     url: '/',
     images: [OGP_IMAGE],
   },
