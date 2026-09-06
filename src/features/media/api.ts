@@ -55,6 +55,10 @@ export async function getMediaArticlesByKeyword(keyword: string, limit = 3): Pro
         filters: `category[equals]4[and]title[contains]${keyword}`,
         limit: Math.max(limit * 4, 12),
         orders: "-publishedAt",
+        // ⚠️ fields を必ず指定する。無いと content / html（本文）まで返り、
+        //    記事1件あたり平均12KB・最大43KB になる。県ハブは3キーワードを同時に引くので
+        //    12件×3 で 1レンダリングあたり約420KB を転送していた（表示に使うのは下の5つだけ）。
+        fields: "id,title,slug,eyecatch,publishedAt",
       },
       context: `getMediaArticlesByKeyword:${keyword}`,
       client: "media",
@@ -65,4 +69,4 @@ export async function getMediaArticlesByKeyword(keyword: string, limit = 3): Pro
   }
 }
 
-export { orderArticlesForRegion, prefectureInTitle }
+export { orderArticlesForRegion }
