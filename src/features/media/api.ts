@@ -1,5 +1,6 @@
 import { fetchList } from "@/shared/microcms/fetcher"
 import type { BlogArticle } from "./types"
+import { orderArticlesForRegion, prefectureInTitle } from "./region-articles"
 
 const fetchArticlesByCategory = async (categoryId: string): Promise<BlogArticle[]> => {
   const data = await fetchList<BlogArticle>({
@@ -46,9 +47,13 @@ export async function getMediaArticlesByKeyword(keyword: string, limit = 3): Pro
       // q(全文検索)だと「運転代行」「軽貨物」などキーワードを言及するだけの記事が
       // 混入するため、title[contains] で本題の記事に限定する（例: title に「タクシー」を
       // 含む＝タクシー運転手の年収/適性/個人タクシー等。運転代行等はタイトルに含まず除外）。
+      //
+      // ⚠️ 地域の絞り込みは microCMS 側でやらない。API が 5/5 で満杯のため新しい
+      //    フィルタ用フィールドを足せず、また候補が減りすぎて枠が埋まらなくなる。
+      //    多めに引いてから orderArticlesForRegion で絞る。
       queries: {
         filters: `category[equals]4[and]title[contains]${keyword}`,
-        limit,
+        limit: Math.max(limit * 4, 12),
         orders: "-publishedAt",
       },
       context: `getMediaArticlesByKeyword:${keyword}`,
@@ -59,3 +64,5 @@ export async function getMediaArticlesByKeyword(keyword: string, limit = 3): Pro
     return []
   }
 }
+
+export { orderArticlesForRegion, prefectureInTitle }

@@ -2,7 +2,7 @@ import { notFound } from "next/navigation"
 import type { Metadata } from "next"
 import HubPage from "@/features/hub/components/hub-page"
 import { getJobsPaged, getJobsForStats } from "@/features/jobs/api"
-import { getMediaArticlesByKeyword } from "@/features/media/api"
+import { getMediaArticlesByKeyword, orderArticlesForRegion } from "@/features/media/api"
 import {
   getExternalJobsForPrefecture,
   getExternalHubCounts,
@@ -133,7 +133,9 @@ export default async function Page({ params }: Props) {
       rankedCats.slice(0, 3).map(async ({ cat }) => {
         const kw = hubArticleKeyword(cat.slug)
         if (!kw) return []
-        const list = await getMediaArticlesByKeyword(kw)
+        // ⚠️ 他県の記事を出さない。地域を渡さないと「東京都の…役立つ記事」の下に
+        //    大阪の記事が並ぶ（本番で実際に起きていた）。
+        const list = orderArticlesForRegion(await getMediaArticlesByKeyword(kw), pref.region)
         return list.slice(0, 1).map((a) => ({
           title: a.title,
           href: `https://ridejob.jp/media/blog/${a.slug ?? a.id}`,

@@ -9,7 +9,7 @@ import {
   EXTERNAL_PAGE_SIZE,
   getExternalHubCounts,
 } from "@/features/external-jobs/api"
-import { getMediaArticlesByKeyword } from "@/features/media/api"
+import { getMediaArticlesByKeyword, orderArticlesForRegion } from "@/features/media/api"
 import { generateHubMetadata } from "@/shared/lib/metadata"
 import {
   HUB_MIN_JOBS,
@@ -132,7 +132,10 @@ export default async function Page({ params }: Props) {
   // ハブ→メディア相互リンク（P1-1）
   const articleKeyword = hubArticleKeyword(cat.slug)
   const relatedArticles = articleKeyword
-    ? (await getMediaArticlesByKeyword(articleKeyword)).map((a) => ({
+    // 全国ハブなので地域は渡さない＝県名を含む記事は出さない
+    ? orderArticlesForRegion(await getMediaArticlesByKeyword(articleKeyword))
+        .slice(0, 3)
+        .map((a) => ({
         title: a.title,
         href: `https://ridejob.jp/media/blog/${a.slug ?? a.id}`,
         image: a.eyecatch?.url,

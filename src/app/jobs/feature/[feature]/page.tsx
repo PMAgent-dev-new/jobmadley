@@ -6,7 +6,7 @@ import {
   getExternalFeatureCount,
   EXTERNAL_PAGE_SIZE,
 } from "@/features/external-jobs/api"
-import { getMediaArticlesByKeyword } from "@/features/media/api"
+import { getMediaArticlesByKeyword, orderArticlesForRegion } from "@/features/media/api"
 import {
   HUB_FEATURES,
   findFeature,
@@ -66,7 +66,10 @@ export default async function Page({ params }: Props) {
     .slice(0, 24)
     .map((p) => ({ label: `${p.region}の求人`, href: hubUrl.prefecture(p.slug!) }))
 
-  const relatedArticles = (await getMediaArticlesByKeyword("ルート配送")).map((a) => ({
+  // 全国の条件ハブなので地域は渡さない＝県名を含む記事は出さない
+  const relatedArticles = orderArticlesForRegion(await getMediaArticlesByKeyword("ルート配送"))
+    .slice(0, 3)
+    .map((a) => ({
     title: a.title,
     href: `https://ridejob.jp/media/blog/${a.slug ?? a.id}`,
     image: a.eyecatch?.url,
