@@ -421,6 +421,33 @@ const VALID_THROUGH_FALLBACK_DAYS = 30
  * markup 自体を出力しない（不正確なエンティティ宣言はペナルティリスク）。
  * その場合は null を返すので、呼び出し側で条件付きレンダリングすること。
  */
+/**
+ * 生の住所から、実際に採用した都道府県名・市区町村名を前方から取り除いて町名を得る。
+ * 空白（半角・全角）は区切りとして無視する。
+ * 取り除けなかった場合は undefined を返す（呼び出し側でパーサの結果に落とす）。
+ */
+export const stripAddressPrefix = (
+  raw?: string,
+  region?: string,
+  locality?: string,
+): string | undefined => {
+  if (!raw) return undefined
+  const squash = (v: string) => v.replace(/[\s　]/g, '')
+  let rest = raw
+  for (const part of [region, locality]) {
+    if (!part) continue
+    // 空白を挟んだ表記（「三重県 四日市市 八田」）にも当てるため、
+    // 1文字ずつ「空白を挟んでもよい」形で先頭から照合する
+    const pattern = new RegExp(
+      '^[\\s　]*' + squash(part).split('').map((c) => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('[\\s　]*'),
+    )
+    const m = rest.match(pattern)
+    if (!m) return undefined
+    rest = rest.slice(m[0].length)
+  }
+  return rest.trim() || undefined
+}
+
 export const generateJobPostingStructuredData = (job: JobDetail) => {
   const baseUrl = SITE_URL
 
@@ -463,8 +490,24 @@ export const generateJobPostingStructuredData = (job: JobDetail) => {
   // 「項目 streetAddress がありません（jobLocation.address に含まれる）」を出す。
   // trim してから連結する。空要素や前後の空白が混じると
   // " 北中振 2004-10-20" のように空白で始まる住所になる。
+  // ⚠️ 町名は parsed.town をそのまま使わない。
+  //
+  // locality はマスタ（job.municipality）で上書きしているのに、town だけ
+  // パーサの結果を使っていたため、両者が食い違うと住所が壊れていた。
+  // 全1,491件の実測（2026-09-06）で27件:
+  //
+  //   三重県 四日市市 八田       → 町名が「市 八田」  （21件・文字が重複）
+  //     パーサが空白を食って「四日市」で停止し、残りが「市 八田」になる。
+  //     マスタが locality を「四日市市」に直しても、town は直らない。
+  //   兵庫県 姫路市 飾磨区 今在家 → 町名が「今在家」  （6件・文字が欠落）
+  //     政令市でない姫路市の「飾磨区」を区として食べてしまい、町名から消える。
+  //
+  // 実際に採用した region と locality を、生の住所から前方一致で取り除いた残りを町名にする。
+  // こうすれば locality をどう補正しても町名と必ず整合する。
+  const town = stripAddressPrefix(job.addressPrefMuni, addressRegion, addressLocality) ?? parsed.town
+
   const streetAddress =
-    [parsed.town, job.addressLine, job.addressBuilding]
+    [town, job.addressLine, job.addressBuilding]
       .map((v) => v?.trim())
       .filter(Boolean)
       .join(' ') || undefined
