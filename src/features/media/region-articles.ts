@@ -35,28 +35,33 @@ export const prefectureInTitle = (title: string): string | undefined => {
 /**
  * ハブに出す関連記事を、そのページの地域に合わせて並べ替える。
  *
- * ⚠️ 他県の記事を出さないこと。実際に /jobs/tokyo の見出し
- * 「東京都の仕事を知る・役立つ記事」の直下に
- * 「大阪府の送迎ドライバー求人データ」が並んでいた（2026-09-06 本番実測）。
- * 記事は公開日順で引いているだけなので、地域を見ないと他県の記事が普通に混ざる。
+ * ⚠️ 記事を**落とさない**こと。順序を変えるだけにする。
+ *
+ * 初版は「県名を含むが自県でない記事」を filter で除外していた。これは2つの理由で誤り。
+ *
+ * 1. タイトルに県名が出るだけの全国向け記事まで落ちる。実測（メディア234本）で
+ *    県名ありと判定された6本のうち2本が全国記事だった:
+ *      「東京のロボタクシーはいつ・どこで乗れる？」   ← サイト2位・2,700imp
+ *      「タクシー不足を救う？大阪万博で進むライドシェアの今と未来」 ← 「大阪万博」で誤判定
+ *    誤判定率33%。しかも落ちたことは画面に出ないので気づけない。
+ * 2. 「大分（だいぶ）」のような副詞や、「千葉」「山口」「石川」などの姓が
+ *    タイトルに入るだけで同じことが起きる。将来の記事で必ず再発する。
+ *
+ * 落とさず後ろへ回せば、上位に自県の記事が来るという目的は達しつつ、
+ * 誤判定しても「順番が少し悪くなる」だけで済む。
  *
  * @param region ページの対象都道府県（正式名）。全国ハブでは undefined を渡すこと。
- *               undefined のときは**県名を含む記事をすべて落とす**
- *               （「送迎ドライバー（全国）」の先頭が大阪の記事、という状態を防ぐ）。
  */
 export const orderArticlesForRegion = <T extends { title: string }>(
   articles: T[],
   region?: string,
 ): T[] => {
-  const kept = articles.filter((a) => {
-    const inTitle = prefectureInTitle(a.title)
-    if (!inTitle) return true // 地域に触れていない記事はどこでも出してよい
-    return inTitle === region
-  })
-  // 自県の記事を先頭へ（現状は公開日順でたまたま入っているだけなので明示的に並べる）
-  return kept.sort((a, b) => {
-    const av = region && prefectureInTitle(a.title) === region ? 0 : 1
-    const bv = region && prefectureInTitle(b.title) === region ? 0 : 1
-    return av - bv
-  })
+  // 0=このページの地域の記事 / 1=地域に触れていない記事 / 2=他県の記事
+  const rank = (title: string): number => {
+    const inTitle = prefectureInTitle(title)
+    if (!inTitle) return 1
+    return inTitle === region ? 0 : 2
+  }
+  // 同順位は元の並び（公開日順）を保つ。Array#sort は安定なのでこれで足りる。
+  return [...articles].sort((a, b) => rank(a.title) - rank(b.title))
 }
