@@ -414,14 +414,6 @@ export const buildJobDescriptionHtml = (job: JobDetail): string => {
 const VALID_THROUGH_FALLBACK_DAYS = 30
 
 /**
- * 構造化データの生成 (Google JobPosting 準拠)
- * @see https://developers.google.com/search/docs/appearance/structured-data/job-posting
- *
- * companyName が無い求人は hiringOrganization を正しく宣言できないため
- * markup 自体を出力しない（不正確なエンティティ宣言はペナルティリスク）。
- * その場合は null を返すので、呼び出し側で条件付きレンダリングすること。
- */
-/**
  * 生の住所から、実際に採用した都道府県名・市区町村名を前方から取り除いて町名を得る。
  * 空白（半角・全角）は区切りとして無視する。
  * 取り除けなかった場合は undefined を返す（呼び出し側でパーサの結果に落とす）。
@@ -432,6 +424,10 @@ export const stripAddressPrefix = (
   locality?: string,
 ): string | undefined => {
   if (!raw) return undefined
+  // ⚠️ region も locality も無いときに raw をそのまま返さないこと。
+  //    ループが空回りして「取り除けなかった」ことに気づけず、
+  //    住所全体が町名として streetAddress に載る（'住所未定' → '住所未定 5-1-10'）。
+  if (!region && !locality) return undefined
   const squash = (v: string) => v.replace(/[\s　]/g, '')
   let rest = raw
   for (const part of [region, locality]) {
@@ -448,6 +444,14 @@ export const stripAddressPrefix = (
   return rest.trim() || undefined
 }
 
+/**
+ * 構造化データの生成 (Google JobPosting 準拠)
+ * @see https://developers.google.com/search/docs/appearance/structured-data/job-posting
+ *
+ * companyName が無い求人は hiringOrganization を正しく宣言できないため
+ * markup 自体を出力しない（不正確なエンティティ宣言はペナルティリスク）。
+ * その場合は null を返すので、呼び出し側で条件付きレンダリングすること。
+ */
 export const generateJobPostingStructuredData = (job: JobDetail) => {
   const baseUrl = SITE_URL
 
@@ -494,12 +498,12 @@ export const generateJobPostingStructuredData = (job: JobDetail) => {
   //
   // locality はマスタ（job.municipality）で上書きしているのに、town だけ
   // パーサの結果を使っていたため、両者が食い違うと住所が壊れていた。
-  // 全1,491件の実測（2026-09-06）で27件:
+  // 全1,491件の実測（2026-09-06）で26件:
   //
   //   三重県 四日市市 八田       → 町名が「市 八田」  （21件・文字が重複）
   //     パーサが空白を食って「四日市」で停止し、残りが「市 八田」になる。
   //     マスタが locality を「四日市市」に直しても、town は直らない。
-  //   兵庫県 姫路市 飾磨区 今在家 → 町名が「今在家」  （6件・文字が欠落）
+  //   兵庫県 姫路市 飾磨区 今在家 → 町名が「今在家」  （5件・文字が欠落）
   //     政令市でない姫路市の「飾磨区」を区として食べてしまい、町名から消える。
   //
   // 実際に採用した region と locality を、生の住所から前方一致で取り除いた残りを町名にする。
