@@ -2,7 +2,7 @@ import { notFound } from "next/navigation"
 import type { Metadata } from "next"
 import HubPage from "@/features/hub/components/hub-page"
 import { getJobsPaged, getJobsForStats } from "@/features/jobs/api"
-import { getMediaArticlesByKeyword } from "@/features/media/api"
+import { getMediaArticlesByKeyword, orderArticlesForRegion } from "@/features/media/api"
 import {
   getExternalJobsForHub,
   getExternalHubCounts,
@@ -171,7 +171,9 @@ export default async function Page({ params }: Props) {
   // ハブ→メディア相互リンク（P1-1）。職種に対応するお役立ち記事を掲載
   const articleKeyword = hubArticleKeyword(cat.slug)
   const relatedArticles = articleKeyword
-    ? (await getMediaArticlesByKeyword(articleKeyword)).map((a) => ({
+    ? orderArticlesForRegion(await getMediaArticlesByKeyword(articleKeyword), pref.region)
+        .slice(0, 3)
+        .map((a) => ({
         title: a.title,
         href: `https://ridejob.jp/media/blog/${a.slug ?? a.id}`,
         image: a.eyecatch?.url,
