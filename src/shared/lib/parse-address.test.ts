@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
-import { parseAddressPrefMuni } from './metadata'
+import { parseAddressPrefMuni, stripAddressPrefix } from './metadata'
 
 /**
  * JobPosting の jobLocation.address を組み立てる住所パーサ。
@@ -56,4 +56,44 @@ test('空・解釈できない文字列では何も返さない', () => {
   assert.deepEqual(parseAddressPrefMuni(undefined), {})
   assert.deepEqual(parseAddressPrefMuni(''), {})
   assert.deepEqual(parseAddressPrefMuni('住所未定'), {})
+})
+
+/**
+ * 町名（streetAddress）の組み立て。
+ *
+ * locality はマスタ（job.municipality）で上書きするのに、町名だけパーサの結果を
+ * 使っていたため、両者が食い違うと住所が壊れていた。
+ * 全1,491件の実測（2026-09-06）で27件が壊れており、うち26件がこの修正の対象。
+ * 残る1件は住所に都道府県が無い「板橋区中丸町」で、#113 の23区補完が効いているもの。
+ */
+
+test('★空白区切りの住所で町名に市区町村の断片が残らない', () => {
+  // パーサが空白を食って「四日市」で停止し、残りが「市 八田」になっていた。
+  // マスタが locality を「四日市市」に直しても、町名は直らない。
+  assert.equal(stripAddressPrefix('三重県 四日市市 八田', '三重県', '四日市市'), '八田')
+  assert.equal(stripAddressPrefix('千葉県 市川市 二俣新町', '千葉県', '市川市'), '二俣新町')
+  assert.equal(stripAddressPrefix('千葉県 市原市 五井', '千葉県', '市原市'), '五井')
+})
+
+test('★政令市でない市の「区」を町名から落とさない', () => {
+  // 姫路市の「飾磨区」は行政区ではなく地名。区として食べると町名から消える。
+  assert.equal(
+    stripAddressPrefix('兵庫県 姫路市 飾磨区 今在家', '兵庫県', '姫路市'),
+    '飾磨区 今在家',
+  )
+})
+
+test('政令市の行政区は locality 側に含める（回帰）', () => {
+  assert.equal(stripAddressPrefix('宮城県仙台市若林区卸町', '宮城県', '仙台市若林区'), '卸町')
+  assert.equal(stripAddressPrefix('北海道札幌市手稲区前田', '北海道', '札幌市手稲区'), '前田')
+})
+
+test('郡を含む住所でも町名が残る', () => {
+  assert.equal(stripAddressPrefix('群馬県佐波郡玉村町川井', '群馬県', '佐波郡玉村町'), '川井')
+})
+
+test('取り除けない住所では undefined（呼び出し側がパーサの結果に落とす）', () => {
+  assert.equal(stripAddressPrefix('板橋区中丸町', '東京都', '板橋区'), undefined)
+  assert.equal(stripAddressPrefix(undefined, '東京都', '板橋区'), undefined)
+  assert.equal(stripAddressPrefix('東京都板橋区', '東京都', '板橋区'), undefined)
 })
