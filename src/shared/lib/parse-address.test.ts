@@ -171,3 +171,20 @@ test('上限を明示できる（OGPなど別の予算で使う場合）', () =>
   const out = fitDescription('東京都のドライバー求人が幅広く集まります。整備士も歓迎です。', 20)
   assert.ok(displayWidth(out) <= 20, `幅超過: ${displayWidth(out)}`)
 })
+
+test('★予算を大きく余らせるくらいなら節の区切りまで伸ばす', () => {
+  // 第1文が短く、次の文が予算に入らないケース。句点だけを見ると幅54で終わり、
+  // 予算140の4割しか使えていなかった（本番 /jobs/category/taxi-driver）。
+  const lead =
+    '全国のタクシードライバー求人・転職情報をお探しの方へ。未経験からの挑戦もキャリアアップも、RIDE JOBが専任アドバイザーとして無料でサポートします。二種免許の取得支援や給与保証のある求人も多数掲載しています。'
+  const out = fitDescription(lead)
+  assert.ok(displayWidth(out) >= 80, `予算を使えていない: 幅${displayWidth(out)} ${out}`)
+  assert.ok(displayWidth(out) <= 140)
+  assert.ok(out.includes('未経験'), out)
+})
+
+test('次の文が予算に収まるなら文で終わる（節へ伸ばさない）', () => {
+  const lead = '大阪府でドライバー・整備士として働きたい方へ。物流・運送から自動車整備まで、幅広い求人が見つかります。' + 'あ'.repeat(100)
+  const out = fitDescription(lead)
+  assert.ok(out.endsWith('。'), out)
+})

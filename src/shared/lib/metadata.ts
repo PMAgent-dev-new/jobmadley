@@ -254,26 +254,28 @@ const truncateForDescription = (text: string, maxLength: number): string => {
 
   // 末尾の「…」1字ぶんを空けて候補を切り出す
   const head = chars.slice(0, maxLength - 1).join('')
-  // 句点は候補の35%以降にあれば採用する。
-  // 半分（50%）を条件にしていたときは、ハブのリード文218本のうち91本が
-  // 語の途中で「…」に落ちていた。35%まで下げると完結する文が127→171本になる。
-  // そのぶん予算の余りは平均25→36に増えるが、meta description は順位の要因ではなく
-  // 検索結果での読みやすさ＝CTRのためのものなので、文が完結している方を優先する。
+
+  // 切断点は「句点」と「節の区切り（読点など）」の2種類。
+  //
+  // 句点で終われれば文として完結して読みやすいが、次の文が予算に入らないと
+  // 予算を大きく余らせる。実測（ハブのリード文218本）では、句点だけを見ると
+  // 47本が幅80未満まで縮み、/jobs/tokyo は幅58＝予算の4割しか使えていなかった。
+  //
+  // そこで「節の区切りの方が SOFT_BREAK_GAIN 以上ぶん予算を使える場合に限り」
+  // 節の区切りを採る。実測で 幅80未満 47→2本、文として完結するもの 171→119本。
+  // 予算を使い切れないより、文が少し途中で終わる方がましだと判断した。
+  const SOFT_BREAK_GAIN = 30 // 幅30＝全角15字ぶん
+
+  // 句点は候補の35%以降にあれば採用する（前すぎると極端に短くなる）
   const sentenceEnd = Math.max(
     head.lastIndexOf('。'),
     head.lastIndexOf('！'),
     head.lastIndexOf('？'),
   )
-  if (sentenceEnd >= head.length * 0.35) return head.slice(0, sentenceEnd + 1)
-
-  // 句点が無い／前すぎる場合は節の区切りで切る。こちらは半分以降を条件にする
-  // （読点だけで極端に短く切ると、何のページか分からなくなるため）。
-  const minCut = head.length / 2
-
-  // ⚠️ 半角スペースを切断点にしない。
-  // 「RIDE JOB」の間の半角スペースを拾い、ブランド名が「…RIDE…」で切れていた
-  // （/jobs/category/taxi-driver ほか6ページで再現）。日本語の文では半角スペースは
-  // 文の区切りではなく、ほぼ英字の語間にしか現れないので、切断点として役に立たない。
+  // ⚠️ 半角スペースを切断点にしないこと。
+  //    「RIDE JOB」の間の半角スペースを拾い、ブランド名が「…RIDE…」で終わっていた
+  //    （/jobs/category/taxi-driver ほか6ページで再現）。日本語の文では半角スペースは
+  //    文の区切りではなく、ほぼ英字の語間にしか現れないので切断点として役に立たない。
   const softBreak = Math.max(
     head.lastIndexOf('、'),
     head.lastIndexOf('，'),
@@ -281,7 +283,18 @@ const truncateForDescription = (text: string, maxLength: number): string => {
     head.lastIndexOf('】'),
     head.lastIndexOf('・'),
   )
-  const cut = softBreak >= minCut ? softBreak + 1 : head.length
+
+  const sentenceOk = sentenceEnd >= head.length * 0.35
+  // 節で切ると極端に短くなりやすいので、こちらは半分以降を条件にする
+  const softOk = softBreak >= head.length / 2
+  const sentenceWidth = sentenceOk ? displayWidth(head.slice(0, sentenceEnd + 1)) : -1
+  // 節で切ると末尾に「…」（幅2）が付く
+  const softWidth = softOk ? displayWidth(head.slice(0, softBreak + 1)) + 2 : -1
+
+  if (sentenceOk && !(softOk && softWidth - sentenceWidth >= SOFT_BREAK_GAIN)) {
+    return head.slice(0, sentenceEnd + 1)
+  }
+  const cut = softOk ? softBreak + 1 : head.length
   return `${head.slice(0, cut).replace(/[、，・\s]+$/, '')}…`
 }
 
