@@ -206,23 +206,35 @@ const truncateForDescription = (text: string, maxLength: number): string => {
 
   // 末尾の「…」1字ぶんを空けて候補を切り出す
   const head = chars.slice(0, maxLength - 1).join('')
-  // 極端に短く切れるのを避けるため、切断位置は候補の後半にある場合のみ採用する
-  const minCut = head.length / 2
+  // 句点は候補の35%以降にあれば採用する。
+  // 半分（50%）を条件にしていたときは、ハブのリード文218本のうち91本が
+  // 語の途中で「…」に落ちていた。35%まで下げると完結する文が127→171本になる。
+  // そのぶん予算の余りは平均25→36に増えるが、meta description は順位の要因ではなく
+  // 検索結果での読みやすさ＝CTRのためのものなので、文が完結している方を優先する。
   const sentenceEnd = Math.max(
     head.lastIndexOf('。'),
     head.lastIndexOf('！'),
     head.lastIndexOf('？'),
   )
-  if (sentenceEnd >= minCut) return head.slice(0, sentenceEnd + 1)
+  if (sentenceEnd >= head.length * 0.35) return head.slice(0, sentenceEnd + 1)
 
+  // 句点が無い／前すぎる場合は節の区切りで切る。こちらは半分以降を条件にする
+  // （読点だけで極端に短く切ると、何のページか分からなくなるため）。
+  const minCut = head.length / 2
+
+  // ⚠️ 半角スペースを切断点にしない。
+  // 「RIDE JOB」の間の半角スペースを拾い、ブランド名が「…RIDE…」で切れていた
+  // （/jobs/category/taxi-driver ほか6ページで再現）。日本語の文では半角スペースは
+  // 文の区切りではなく、ほぼ英字の語間にしか現れないので、切断点として役に立たない。
   const softBreak = Math.max(
     head.lastIndexOf('、'),
     head.lastIndexOf('，'),
     head.lastIndexOf('）'),
-    head.lastIndexOf(' '),
+    head.lastIndexOf('】'),
+    head.lastIndexOf('・'),
   )
   const cut = softBreak >= minCut ? softBreak + 1 : head.length
-  return `${head.slice(0, cut).replace(/[、，\s]+$/, '')}…`
+  return `${head.slice(0, cut).replace(/[、，・\s]+$/, '')}…`
 }
 
 /**
