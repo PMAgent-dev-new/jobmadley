@@ -140,7 +140,52 @@ export const generateSearchMetadata = (params: {
 // =====================
 
 /** meta description の目安長。日本語SERPは全角120字前後で切られるため、この範囲に収める */
-const JOB_DESCRIPTION_MAX_LENGTH = 120
+/**
+ * meta description の表示幅の上限。
+ *
+ * 検索結果は文字数ではなく**表示幅**で切られる。全角=2・半角=1 で数えて
+ * だいたい 120〜140 が上限で、超えた分は「…」で落とされる。
+ * 日本語は1字=幅2なので、全角70字ぶん。
+ *
+ * 実測（2026-09-06 本番）では全ページが超過していた:
+ *   / 176 ／ /jobs/tokyo 268 ／ /jobs/osaka 264 ／ /jobs/tokyo/taxi-driver 222
+ * ハブは本文のリード文（100〜130字）をそのまま description に流していたため、
+ * 検索結果では後半が丸ごと表示されていなかった。
+ */
+export const DESCRIPTION_MAX_WIDTH = 140
+
+/** 全角=2・半角=1 の表示幅。検索結果の切り詰めはこの単位で起きる。 */
+export const displayWidth = (text: string): number =>
+  Array.from(text).reduce((w, c) => w + (c.codePointAt(0)! > 0x2e80 ? 2 : 1), 0)
+
+/**
+ * 表示幅の上限に収まるよう description を整える。
+ * 収まっていればそのまま返す。超えていれば、幅から逆算した字数で
+ * truncateForDescription に渡し、文の区切りで切る。
+ */
+export const fitDescription = (
+  text: string,
+  maxWidth: number = DESCRIPTION_MAX_WIDTH,
+): string => {
+  const trimmed = text.replace(/\s+/g, ' ').trim()
+  if (displayWidth(trimmed) <= maxWidth) return trimmed
+  // 幅→字数は文字ごとに違うので、幅を数えながら入るところまで取る
+  let width = 0
+  let chars = 0
+  for (const c of Array.from(trimmed)) {
+    const w = c.codePointAt(0)! > 0x2e80 ? 2 : 1
+    if (width + w > maxWidth) break
+    width += w
+    chars += 1
+  }
+  return truncateForDescription(trimmed, chars)
+}
+
+/**
+ * ⚠️ かつてここは 120「文字」だった。日本語は1字=幅2なので実際には幅240で、
+ * 検索結果の上限（幅140）のほぼ倍。後半が丸ごと表示されていなかった。
+ * 上限は DESCRIPTION_MAX_WIDTH（幅）で持ち、字数はそこから逆算する。
+ */
 
 /**
  * CMS本文を meta description 用の1行テキストへ整形する。
@@ -218,11 +263,17 @@ export const generateJobMetadata = (job: JobDetail): Metadata => {
   const descriptionPrefix = locationText
     ? `${locationText}の${job.jobCategory?.name || 'ドライバー'}求人。${salaryText}。`
     : `${job.jobCategory?.name || 'ドライバー'}求人。${salaryText}。`
+  // 地域・職種・給与の定型部分が使う幅を先に引き、残りをCMS本文に割り当てる。
+  // 幅→字数は文字ごとに違うため、残り幅を全角（幅2）で割った字数を上限にする。
+  // 全角前提で見積もるので、半角混じりの本文では余りが出る。
+  // 溢れるよりは短い方が安全（溢れた分は検索結果に出ない）。
+  const remainingWidth = Math.max(0, DESCRIPTION_MAX_WIDTH - displayWidth(descriptionPrefix))
   const appeal = truncateForDescription(
     normalizeDescriptionSource(job.descriptionAppeal || job.descriptionWork),
-    JOB_DESCRIPTION_MAX_LENGTH - Array.from(descriptionPrefix).length,
+    Math.floor(remainingWidth / 2),
   )
-  const description = `${descriptionPrefix}${appeal || '詳細情報をご確認ください。'}`
+  // 定型部分だけで上限を超える求人（長い自治体名＋給与レンジ）に備えて最後に丸める
+  const description = fitDescription(`${descriptionPrefix}${appeal || '詳細情報をご確認ください。'}`)
   
   const imageUrl = job.images?.[0]?.url || job.imageUrl || OGP_IMAGE
   
@@ -615,7 +666,11 @@ export const generateHubMetadata = (params: {
   description: string
   canonicalPath: string
 }): Metadata => {
-  const { title, description, canonicalPath } = params
+  const { title, canonicalPath } = params
+  // 呼び出し側は本文のリード文をそのまま渡してくる（100〜130字）。
+  // 検索結果に出るのは幅140までなので、ここで必ず丸める。
+  // 各ハブの generateMetadata に散らさず1箇所で効かせる。
+  const description = fitDescription(params.description)
   return {
     title,
     description,
