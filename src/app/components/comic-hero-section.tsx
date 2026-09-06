@@ -6,10 +6,19 @@ import Image from "next/image"
 import { Search, MapPin } from "lucide-react"
 import styles from "./comic-hero-section.module.css"
 
+// ⚠️ 押すと検索窓に入る語なので、**着地して結果が出る語だけ**を並べること。
+//    /search は microCMS の自社求人をタイトル等で引く。ハブと違って転載求人は含まない。
+//    そのため「転載を含めた掲載件数」ではなく、**自社求人で引けるか**を基準にすること。
+//    自社求人の内訳（2026-09-07 実測・jobs-feed.xml）:
+//      整備士451 / タクシー377 / バイク整備士302 / 営業139 / トラック83 /
+//      運行管理36 / ハイヤー32 / バス16
+//    ここに並べた6語はすべて /search で結果が返ることを実測済み。
+//    「フードデリバリー」は自社在庫が無く、無関係な求人（バックオフィス事務など）に
+//    着地していたため外した。
 const POPULAR_TAGS = [
   "タクシードライバー",
+  "トラックドライバー",
   "自動車整備士",
-  "フードデリバリー",
   "未経験OK",
   "高収入",
   "東京23区",
@@ -40,12 +49,17 @@ export default function ComicHeroSection() {
       <div className={styles.grid}>
         <div className={styles.copy}>
           <span className={styles.eyebrow}>⚡ 街を支える仕事の求人サイト</span>
+          {/* H1はページの主題を表す見出し。キャッチコピーだけだと、Googleにも読み手にも
+              何のサイトか伝わらない（旧: 「ガッ！と街を、動かせ。」のみで事業KWがゼロ、
+              TOPは平均30.4位）。コピーは主役のまま残し、主題を1行足す。
+              ⚠️ 視覚的に隠さないこと。隠しテキストは検索エンジンに操作と見なされうる。 */}
           <h1 className={styles.h1}>
             <span className={styles.ka}>ガッ！</span>と<br />
             <span className={styles.underline}>街を、動かせ</span>。
+            <span className={styles.h1sub}>タクシー・トラック・整備士の求人・転職</span>
           </h1>
           <p className={styles.lede}>
-            タクシードライバー、自動車整備士、フードデリバリー…
+            タクシードライバー、トラックドライバー、自動車整備士…
             街を支える仕事の求人を、ライオン社長が本気でマッチングします。
           </p>
 

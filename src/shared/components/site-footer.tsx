@@ -49,7 +49,7 @@ export default function SiteFooter() {
             <span className={styles.ctaSticker}>NOW HIRING</span>
             <h3 className={styles.ctaTitle}>あなたにぴったりの求人を探そう</h3>
             <p className={styles.ctaText}>
-              タクシードライバー、自動車整備士、フードデリバリーまで。条件で絞り込んで、あなたに合う仕事を見つけよう。
+              タクシードライバー、トラックドライバー、自動車整備士まで。条件で絞り込んで、あなたに合う仕事を見つけよう。
             </p>
             <Link href="/search" className={styles.ctaButton}>
               求人情報を見る
