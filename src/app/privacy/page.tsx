@@ -25,6 +25,9 @@ export default function PrivacyPolicyPage() {
           {/* Intro */}
           <p className="text-sm leading-relaxed mb-8">
             株式会社PM Agent（以下「当社」といいます。）は、ユーザーの個人情報（個人情報保護法第２条第１項により定義された「個人情報」をいい、以下同様とします。）について以下のとおりプライバシーポリシー（以下「本ポリシー」といいます。）を定めます。
+          </p>
+
+          <p className="text-sm leading-relaxed mb-8">
             本ポリシーは、当社がどのような個人情報を取得し、それをどのように利用・共有するか、ユーザーがどのようにご自身の個人情報を管理できるかといったことをご説明するものです。
           </p>
 
@@ -32,8 +35,8 @@ export default function PrivacyPolicyPage() {
           <li>
             <h2 className="font-semibold text-base mb-2">1. 事業者情報</h2>
             <p>法人名：株式会社PM Agent</p>
-            <p>住所：〒150-0041　東京都渋谷区神南１−６−５ Shibuya WayP ８−４</p>
-            <p>代表：梅津　哲豪</p>
+            <p>住所　：〒150-0041　東京都渋谷区神南１−６−５ Shibuya WayP ８−４</p>
+            <p>代表　：梅津　哲豪</p>
           </li>
 
           <li>
@@ -78,7 +81,7 @@ export default function PrivacyPolicyPage() {
               <li>公衆衛生の向上又は児童の健全な育成の推進のために特に必要がある場合であって、本人の同意を得ることが困難であるとき</li>
               <li>国の機関若しくは地方公共団体又はその委託を受けた者が法令の定める事務を遂行することに対して協力する必要がある場合であって、本人の同意を得ることにより当該事務の遂行に支障を及ぼすおそれがあるとき</li>
               <li>次に掲げる事項をあらかじめ本人に通知または公表し、かつ当社が個人情報保護委員会に届出をしたとき
-                <ul className="list-disc ml-6 space-y-1 mt-1">
+                <ul className="list-decimal ml-6 space-y-1 mt-1">
                   <li>第三者への提供を利用目的とすること</li>
                   <li>第三者に提供される個人情報の項目</li>
                   <li>第三者への提供の方法</li>
