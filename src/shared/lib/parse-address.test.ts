@@ -188,3 +188,44 @@ test('次の文が予算に収まるなら文で終わる（節へ伸ばさな�
   const out = fitDescription(lead)
   assert.ok(out.endsWith('。'), out)
 })
+
+/**
+ * 求人シンジケーションフィード（/jobs-feed.xml）の勤務地。
+ *
+ * microCMS のリレーション（municipality / prefecture）が張られていない求人があり、
+ * 実測（2026-09-07・全1,491件）で 200件（13.4%）が city と state の両方が空だった。
+ * 宛先は Googleしごと検索・求人ボックス・スタンバイで、勤務地が空の求人は
+ * 地域を含むクエリに一切マッチしない。
+ */
+
+const feedArea = (job: {
+  municipality?: { name: string }
+  prefecture?: { region: string }
+  addressPrefMuni?: string
+}) => {
+  const parsed = parseAddressPrefMuni(job.addressPrefMuni)
+  return { city: job.municipality?.name ?? parsed.locality, state: job.prefecture?.region ?? parsed.region }
+}
+
+test('★リレーションが無くても住所から勤務地を出す', () => {
+  assert.deepEqual(feedArea({ addressPrefMuni: '岩手県釜石市平田' }), { state: '岩手県', city: '釜石市' })
+  assert.deepEqual(feedArea({ addressPrefMuni: '宮城県遠田郡美里町関根字堤筒' }), {
+    state: '宮城県',
+    city: '遠田郡美里町',
+  })
+})
+
+test('リレーションがあればそちらを優先する（マスタが正）', () => {
+  assert.deepEqual(
+    feedArea({
+      municipality: { name: '四日市市' },
+      prefecture: { region: '三重県' },
+      addressPrefMuni: '三重県 四日市市 八田',
+    }),
+    { state: '三重県', city: '四日市市' },
+  )
+})
+
+test('住所もリレーションも無ければ undefined（空タグのまま）', () => {
+  assert.deepEqual(feedArea({}), { state: undefined, city: undefined })
+})

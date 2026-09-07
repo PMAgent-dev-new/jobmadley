@@ -1,5 +1,5 @@
 import { getAllJobsForFeed } from "@/features/jobs/api"
-import { buildJobDescriptionHtml, SITE_URL } from "@/shared/lib/metadata"
+import { buildJobDescriptionHtml, parseAddressPrefMuni, SITE_URL } from "@/shared/lib/metadata"
 import type { JobDetail } from "@/features/jobs/types"
 
 // 求人アグリゲーター向け求人フィード（Indeed互換の汎用XML。求人ボックス/スタンバイも取り込み可）。
@@ -38,6 +38,19 @@ export async function GET() {
   const items = jobs
     .map((j) => {
       const url = `${SITE_URL}/job/${j.id}`
+      // ⚠️ municipality / prefecture のリレーションだけを見ないこと。
+      //
+      // microCMS でリレーションが張られていない求人があり、実測（2026-09-07・全1,491件）で
+      // **200件（13.4%）が <city> と <state> の両方が空**のまま配信されていた。
+      // このフィードの宛先は Googleしごと検索・求人ボックス・スタンバイで、
+      // 勤務地が空の求人は地域を含むクエリに一切マッチしない。当社の求人は
+      // ほぼすべて地域で探されるので、13%が事実上見つからない状態だった。
+      //
+      // 住所文字列（addressPrefMuni）は fields で既に取得しているのに使っていなかった。
+      // 求人詳細ページの JobPosting と同じ parseAddressPrefMuni に落として揃える。
+      const parsed = parseAddressPrefMuni(j.addressPrefMuni)
+      const city = j.municipality?.name ?? parsed.locality
+      const state = j.prefecture?.region ?? parsed.region
       const company = j.hideCompanyName ? "非公開" : (j.companyName ?? "")
       const date = j.publishedAt ?? j.createdAt ?? ""
       return `  <job>
@@ -47,8 +60,8 @@ export async function GET() {
     <url>${cdata(url)}</url>
     <company>${cdata(company)}</company>
     <sourcename>${cdata("RIDE JOB")}</sourcename>
-    <city>${cdata(j.municipality?.name)}</city>
-    <state>${cdata(j.prefecture?.region)}</state>
+    <city>${cdata(city)}</city>
+    <state>${cdata(state)}</state>
     <country>${cdata("JP")}</country>
     <postalcode>${cdata(j.addressZip)}</postalcode>
     <category>${cdata(j.jobCategory?.name)}</category>
