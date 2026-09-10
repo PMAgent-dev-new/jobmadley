@@ -16,6 +16,7 @@
  *   - price は名目 1 JPY（価格オーバーレイOFF前提。給与は description と custom_label_3 に格納）。
  *   - 緯度経度(availability_circle) / neighborhoods は Meta 標準カタログで不要のため出力しない。
  */
+import { buildCatalogLink, isCatalogLinkRoutedCorrectly } from './lib/catalog-link.mts'
 import { createClient } from 'microcms-js-sdk'
 import { put } from '@vercel/blob'
 import { readFileSync } from 'node:fs'
@@ -376,7 +377,7 @@ function toRow(
     availability: 'in stock',
     condition: 'new',
     price: '1 JPY', // 名目（価格オーバーレイOFF前提。給与は description / custom_label_3 に格納）
-    link: `https://ridejob.jp/job/${job.id}?utm_content=${job.id}&utm_source=meta&utm_medium=catalog`,
+    link: buildCatalogLink(job.id, cat), // 整備士は応募フォーム /entry/mechanic へ（catalog-link.mts）
     image_link: img,
     brand: clip(job.companyName || 'RIDEJOB', 100),
     'address.city': locality,
@@ -542,6 +543,17 @@ async function main() {
   if (rows.some((row) => row['custom_label_4'] === 'other')) {
     throw new Error('配信対象求人に詳細職種 other が含まれています')
   }
+  // 遷移先の振り分けを全行検査する（整備士だけ /entry/mechanic?job_id=、他職種は従来の /job/{id}）。
+  // 崩れていたら publish しない。遷移先が黙って変わる事故を防ぐカナリア（catalog-link.mts）。
+  const misrouted = rows.filter((row) => !isCatalogLinkRoutedCorrectly(row['id'], row['custom_label_0'], row['link']))
+  if (misrouted.length) {
+    const sample = misrouted[0]
+    throw new Error(`遷移先の振り分けが崩れた行が ${misrouted.length} 件あります（例: ${sample['id']} / ${sample['custom_label_0']} / ${sample['link']}）`)
+  }
+  const linkRouting = {
+    entry_mechanic: rows.filter((row) => row['link'].startsWith('https://ridejob.jp/entry/mechanic?')).length,
+    job_detail: rows.filter((row) => row['link'].startsWith('https://ridejob.jp/job/')).length,
+  }
   const tsv = toTSV(rows)
   const reviewTsv = toReviewTSV(rows)
   const excluded = jobs.length - rows.length
@@ -567,6 +579,7 @@ async function main() {
     image_source_counts: imageSourceCounts,
     image_generation_queue_count: imageGenerationQueue.length,
     duplicate_reference_source_count: duplicateReferenceSources.size,
+    link_routing: linkRouting,
     classification_counts: {
       primary: primaryCategoryCounts,
       detailed: detailedRoleCounts,
