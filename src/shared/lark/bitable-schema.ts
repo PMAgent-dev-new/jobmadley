@@ -63,10 +63,11 @@ const APPLICATION_SOURCE_MASTER: Partial<Record<LarkServiceId, { tableId: string
 }
 
 /** applicationSource（正規化済み）→ 応募経由マスタの選択肢名（ridejob/mechanic 共通。テキスト列の値）。 */
-const applicationSourceMasterName = (applicationSource: string | undefined): string => {
+export const applicationSourceMasterName = (applicationSource: string | undefined): string => {
   const s = applicationSource?.trim().toLowerCase()
   if (s === "standby") return "スタンバイ"
   if (s === "kyujinbox") return "kbox/feed"
+  if (["meta", "facebook", "fb", "instagram", "ig"].includes(s || "")) return "Meta広告"
   return "RIDEJOB HP"
 }
 
@@ -234,8 +235,8 @@ const buildMechanicFields = (input: ApplicationFields): Record<string, unknown> 
     utm_medium: input.utmMedium,
     utm_campaign: input.utmCampaign,
     応募日: input.appliedAtMillis,
-    // 求人ID / 勤務地 / 応募経由(生) / 流入チャネル / チャネル / 初回接触 / 最終接触日時 / fbclid / gclid は載せない。
-    // 求人ボックス経由の応募者詳細（extraNotes）は残す。
+    // 求人IDの専用列はない。外部求人のraw IDと受付区分、求人ボックス経由の応募者詳細は
+    // extraNotes で対応履歴メモに残す。
     対応履歴メモ: buildNotes(input, []),
   })
 

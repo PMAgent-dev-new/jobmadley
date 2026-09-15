@@ -18,6 +18,7 @@ const endpoint = process.env.CATALOG_GENERATE_API_URL || ''
 const token = process.env.CATALOG_GENERATE_TOKEN || ''
 const quality = process.env.CATALOG_IMAGE_GENERATION_QUALITY || 'medium'
 const totalLimit = Math.max(1, Math.min(Number(process.env.CATALOG_IMAGE_GENERATION_LIMIT) || 10, 50))
+const cursor = Math.max(0, Number(process.env.CATALOG_IMAGE_QUEUE_CURSOR) || 0)
 // The generation API processes jobs sequentially and has a 300-second runtime cap.
 // Keep the default request to one image so a slow batch cannot discard later results.
 const batchSize = Math.max(1, Math.min(Number(process.env.CATALOG_IMAGE_GENERATION_BATCH_SIZE) || 1, 10))
@@ -30,7 +31,11 @@ if (!endpoint) {
 const payload = JSON.parse(
   await readFile('catalog-image-generation-queue.json', 'utf-8'),
 ) as { jobs?: QueueJob[] }
-const jobs = (payload.jobs || []).slice(0, totalLimit)
+const allJobs = payload.jobs || []
+const start = allJobs.length ? (cursor * totalLimit) % allJobs.length : 0
+const jobs = allJobs.length <= totalLimit
+  ? allJobs
+  : [...allJobs.slice(start), ...allJobs.slice(0, start)].slice(0, totalLimit)
 if (!jobs.length) {
   console.log('[catalog-image-queue] 生成・承認待ち求人はありません')
   process.exit(0)
@@ -76,6 +81,6 @@ for (const batch of batches) {
 }
 
 console.log(
-  `[catalog-image-queue] processed=${jobs.length} / generated=${generated} / skipped=${skipped} / errored=${errored} / estimated_cost=$${totalCost.toFixed(4)}`,
+  `[catalog-image-queue] cursor=${cursor} start=${start} / processed=${jobs.length} / generated=${generated} / skipped=${skipped} / errored=${errored} / estimated_cost=$${totalCost.toFixed(4)}`,
 )
 if (errored > 0) process.exitCode = 1

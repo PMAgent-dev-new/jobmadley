@@ -29,6 +29,14 @@ test('encodes anything unsafe in the id', () => {
   assert.equal(buildCatalogLink('a&b', 'mechanic'), 'https://ridejob.jp/entry/mechanic?job_id=a%26b')
 })
 
+test('sends Hello Work products to the matching RIDE JOB detail page', () => {
+  const id = '27010-41545161'
+  const expected = `https://ridejob.jp/external-job/hellowork/${id}`
+  assert.equal(buildCatalogLink(id, 'mechanic', 'hellowork'), expected)
+  assert.ok(!expected.includes('utm_'))
+  assert.ok(isCatalogLinkRoutedCorrectly(id, 'mechanic', expected, 'hellowork'))
+})
+
 test('flags rows whose link does not match their category', () => {
   assert.ok(isCatalogLinkRoutedCorrectly('x1', 'mechanic', 'https://ridejob.jp/entry/mechanic?job_id=x1'))
   assert.ok(isCatalogLinkRoutedCorrectly('x1', 'taxi', LEGACY('x1')))

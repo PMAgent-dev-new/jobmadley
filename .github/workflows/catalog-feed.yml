@@ -1,12 +1,14 @@
 name: catalog-feed
 
-# RIDEJOB の Meta カタログフィードを microCMS から生成し、Vercel Blob の固定URLへ publish する定期ジョブ。
-# Meta のカタログはその固定URLを 6h ごとに pull する（Commerce Manager のデータソースに登録）。
+# RIDEJOB の Meta カタログフィードをmicroCMS/Supabaseから生成し、
+# PM AgentのSupabase Storage固定URLへpublishする定期ジョブ。
+# ハローワーク全国同期後も既存どおり6時間ごとに生成し、Metaは3時間ごとに固定URLをpullする。
 #
 # 必要な Secrets（Settings → Secrets and variables → Actions）:
 #   - NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN
 #   - MICROCMS_API_KEY
-#   - BLOB_READ_WRITE_TOKEN   (Vercel の Storage → Blob で発行)
+#   - SUPABASE_URL / SUPABASE_ANON_KEY（求人DB読み取り）
+#   - SUPABASE_SERVICE_ROLE_KEY（meta-catalogバケットへの書き込み）
 #   - CATALOG_APPROVED_IMAGES_URL (ridejob-analytics の承認済み画像JSON API)
 #   - CATALOG_FEED_TOKEN          (上記APIの読み取りトークン)
 #   - CATALOG_GENERATE_API_URL    (ridejob-analytics の /api/ai/catalog-generate)
@@ -14,19 +16,49 @@ name: catalog-feed
 
 on:
   schedule:
-    - cron: '0 */6 * * *' # 6時間ごと（UTC）
+    - cron: '0 */6 * * *' # 既存どおり6時間ごと。直近30時間内の正常な全国同期だけを使用
   workflow_dispatch:
     inputs:
-      force_regenerate_images:
-        description: 既存キャッシュを無視して全カタログ画像を再生成する
+      operation:
+        description: 通常公開・補助処理・直前スナップショット復元
+        required: true
+        default: publish
+        type: choice
+        options:
+          - publish
+          - ensure_meta_source_master
+          - rebaseline_existing_feed
+          - restore_latest_snapshot
+      generate_image_candidates:
+        description: 費用承認済みの場合だけ求人別のAI画像候補を生成する
         required: false
         default: false
         type: boolean
-      generate_image_candidates:
-        description: 求人別の画像候補を承認キューへ生成する
+      initial_publish_confirmed:
+        description: 外部求人を初回公開する場合だけ有効化する（初回以外は不要）
         required: false
-        default: true
+        default: false
         type: boolean
+      expected_external_jobs:
+        description: 初回公開時に直前検証した外部求人の期待件数（完全一致ゲート）
+        required: false
+        default: '0'
+        type: string
+      expected_products:
+        description: 初回公開時に直前検証した全商品の期待件数（完全一致ゲート）
+        required: false
+        default: '0'
+        type: string
+      expected_owned_products:
+        description: 初回公開時に直前検証した自社商品の期待件数（完全一致ゲート）
+        required: false
+        default: '0'
+        type: string
+      expected_mechanic_products:
+        description: 初回公開時に直前検証した整備士商品の期待件数（完全一致ゲート）
+        required: false
+        default: '0'
+        type: string
 
 concurrency:
   group: catalog-feed
@@ -38,7 +70,7 @@ permissions:
 jobs:
   generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v6
 
@@ -50,31 +82,94 @@ jobs:
       - run: npm ci
 
       - name: Install Japanese fonts for catalog creatives
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.operation == 'publish' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends fonts-noto-cjk
 
       - name: Test catalog feed
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.operation == 'publish' }}
         run: npm run test:catalog-feed
 
+      - name: Ensure Meta application-source master rows
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'ensure_meta_source_master' }}
+        run: npm run ensure:meta-source-master
+        env:
+          APP_ID_RIDEJOB: ${{ secrets.APP_ID_RIDEJOB }}
+          APP_SECRET_RIDEJOB: ${{ secrets.APP_SECRET_RIDEJOB }}
+          APP_TOKEN_RIDEJOB: ${{ secrets.APP_TOKEN_RIDEJOB }}
+          LARK_DOMAIN_RIDEJOB: ${{ secrets.LARK_DOMAIN_RIDEJOB }}
+          APP_ID_MECHANIC: ${{ secrets.APP_ID_MECHANIC }}
+          APP_SECRET_MECHANIC: ${{ secrets.APP_SECRET_MECHANIC }}
+          APP_TOKEN_MECHANIC: ${{ secrets.APP_TOKEN_MECHANIC }}
+          LARK_DOMAIN_MECHANIC: ${{ secrets.LARK_DOMAIN_MECHANIC }}
+          CATALOG_META_SOURCE_MASTER_CONFIRMED: 'true'
+
+      - name: Rebaseline existing primary feed
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'rebaseline_existing_feed' }}
+        run: npm run rebaseline:catalog-feed
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CATALOG_STORAGE_BUCKET: meta-catalog
+          CATALOG_REBASELINE_CONFIRMED: 'true'
+
+      - name: Restore latest verified catalog snapshot
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'restore_latest_snapshot' }}
+        run: npm run restore:catalog-feed
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CATALOG_STORAGE_BUCKET: meta-catalog
+          CATALOG_RESTORE_CONFIRMED: 'true'
+
+      - name: Refresh and verify Meta catalog after restore
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'restore_latest_snapshot' }}
+        run: npm run refresh:meta-catalog
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CATALOG_STORAGE_BUCKET: meta-catalog
+          META_ACCESS_TOKEN_WRITE: ${{ secrets.META_ACCESS_TOKEN_WRITE }}
+          CATALOG_META_FEED_ID: '1723120795666904'
+          CATALOG_META_CATALOG_ID: '2747970972248998'
+          CATALOG_META_MAX_INVALID_ITEMS: '9'
+
       - name: Generate & publish catalog feed
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.operation == 'publish' }}
         run: npm run generate:catalog-feed
         env:
           NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN: ${{ secrets.NEXT_PUBLIC_MICROCMS_SERVICE_DOMAIN }}
           MICROCMS_API_KEY: ${{ secrets.MICROCMS_API_KEY }}
-          BLOB_READ_WRITE_TOKEN: ${{ secrets.BLOB_READ_WRITE_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CATALOG_STORAGE_BUCKET: meta-catalog
           CATALOG_APPROVED_IMAGES_URL: ${{ secrets.CATALOG_APPROVED_IMAGES_URL }}
           CATALOG_FEED_TOKEN: ${{ secrets.CATALOG_FEED_TOKEN }}
-          CATALOG_IMAGE_FORCE_REGENERATE: ${{ inputs.force_regenerate_images || 'false' }}
+          CATALOG_SNAPSHOT_BEFORE_PUBLISH: 'true'
+          CATALOG_PUBLISH_REQUIRED: 'true'
+          CATALOG_INITIAL_PUBLISH_CONFIRMED: ${{ github.event_name == 'workflow_dispatch' && inputs.initial_publish_confirmed || 'false' }}
+          CATALOG_EXPECT_EXTERNAL_JOBS: ${{ inputs.expected_external_jobs || '0' }}
+          CATALOG_EXPECT_PRODUCTS: ${{ inputs.expected_products || '0' }}
+          CATALOG_EXPECT_OWNED_PRODUCTS: ${{ inputs.expected_owned_products || '0' }}
+          CATALOG_EXPECT_MECHANIC_PRODUCTS: ${{ inputs.expected_mechanic_products || '0' }}
+          CATALOG_MIN_EXTERNAL_JOBS: '5000'
+          CATALOG_MAX_EXTERNAL_DROP_RATIO: '0.30'
           CATALOG_ALLOW_GENERIC_IMAGE_FALLBACK: 'false'
+          META_ACCESS_TOKEN_WRITE: ${{ secrets.META_ACCESS_TOKEN_WRITE }}
+          CATALOG_META_FEED_ID: '1723120795666904'
+          CATALOG_META_CATALOG_ID: '2747970972248998'
+          CATALOG_META_MAX_INVALID_ITEMS: '9'
 
       - name: Generate job-specific image candidates
-        if: ${{ github.event_name != 'workflow_dispatch' || inputs.generate_image_candidates }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'publish' && inputs.generate_image_candidates }}
         run: npm run generate:catalog-image-candidates
         env:
           CATALOG_GENERATE_API_URL: ${{ secrets.CATALOG_GENERATE_API_URL }}
           CATALOG_GENERATE_TOKEN: ${{ secrets.CATALOG_GENERATE_TOKEN }}
           CATALOG_IMAGE_GENERATION_LIMIT: '10'
+          CATALOG_IMAGE_QUEUE_CURSOR: ${{ github.run_number }}
           # The API generates sequentially and has a 300-second production runtime cap.
           CATALOG_IMAGE_GENERATION_BATCH_SIZE: '1'
           CATALOG_IMAGE_GENERATION_QUALITY: medium

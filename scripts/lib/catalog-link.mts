@@ -22,8 +22,19 @@
  *
  * タクシー等の他職種は従来どおり `/job/{id}`（jobmadley 側の応募導線）で、URL も1文字も変えない。
  */
-export function buildCatalogLink(jobId: string, category: string): string {
+export type CatalogOrigin = 'ridejob' | 'hellowork'
+
+export function buildCatalogLink(
+  jobId: string,
+  category: string,
+  origin: CatalogOrigin = 'ridejob',
+): string {
   const id = encodeURIComponent(jobId)
+  if (origin === 'hellowork') {
+    // 求人IDはパス自体で照合できる。utm は広告側 url_tags に一本化し、同名キーの
+    // 二重付与で応募帰属が catalog 扱いになることを防ぐ。
+    return `https://ridejob.jp/external-job/hellowork/${id}`
+  }
   if (category === 'mechanic') {
     return `https://ridejob.jp/entry/mechanic?job_id=${id}`
   }
@@ -31,6 +42,11 @@ export function buildCatalogLink(jobId: string, category: string): string {
 }
 
 /** 行の遷移先が職種に対して正しいか（フィード全行の公開前検査に使う）。 */
-export function isCatalogLinkRoutedCorrectly(jobId: string, category: string, link: string): boolean {
-  return link === buildCatalogLink(jobId, category)
+export function isCatalogLinkRoutedCorrectly(
+  jobId: string,
+  category: string,
+  link: string,
+  origin: CatalogOrigin = 'ridejob',
+): boolean {
+  return link === buildCatalogLink(jobId, category, origin)
 }

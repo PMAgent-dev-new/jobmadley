@@ -5,6 +5,8 @@ export const CATALOG_DESCRIPTION_MAX_LENGTH = 700
 export const CATALOG_DESCRIPTION_MIN_LENGTH = 100
 export const PM_AGENT_DISCLOSURE =
   '本求人は株式会社PM Agentが紹介します。応募後、担当者より選考手順をご案内します。'
+export const HELLOWORK_DISCLOSURE =
+  '出典：ハローワークインターネットサービスの公開求人情報。RIDE JOBはハローワーク公式サイトではありません。公開情報をもとに掲載しており、内容は最新の求人票と異なる場合があります。応募前に条件をご確認ください。'
 
 export type CatalogCopyCategory = 'taxi' | 'hire' | 'dispatch' | 'mechanic' | 'other'
 
@@ -23,6 +25,7 @@ export type CatalogCopyInput = {
   descriptionBenefits?: string
   workHours?: string
   holidays?: string
+  disclosure?: string
 }
 
 const PROHIBITED_PHRASES = [
@@ -33,6 +36,8 @@ const PROHIBITED_PHRASES = [
 
 const EMPLOYER_VOICE = /当社|弊社|当営業所|当店|当校|当法人|当グループ|私たち|私ども|我が社/
 const SELECTION_FLOW = /選考の流れ|応募方法|応募いただいた後|応募後は|株式会社PM Agentから|RIDE JOBのワンストップ/
+const SOURCE_APPLICATION_GUIDANCE = /ハローワーク[^。\n]{0,80}(?:応募|紹介状|窓口|問い合わせ|問合せ)|(?:応募|紹介状|窓口|問い合わせ|問合せ)[^。\n]{0,80}ハローワーク/
+const DISCRIMINATORY_JOB_CONDITION = /[0-9０-９]{1,3}\s*歳\s*(?:以下|未満|以上|まで)(?:の方|の人)?(?:を)?(?:募集|歓迎|限定|応募|採用)|(?:男性|女性|男子|女子)\s*(?:のみ|限定|歓迎|募集)/
 const QA_HEADING = /^(?:【?Q\d+】?|Q\d+[.．:：]|よくある質問)/i
 const QUESTION_UNIT = /[?？]\s*$/
 const STANDALONE_QA_ANSWER = /^(?:問題ありません|ご安心ください)[。！!]*$/
@@ -103,7 +108,12 @@ function compactSection(
     const unit = normalizeQaStyle(rawUnit)
     if (!unit) continue
     if (PROHIBITED_PHRASES.some((phrase) => unit.includes(phrase))) continue
-    if (SELECTION_FLOW.test(unit) || QA_HEADING.test(unit) || QUESTION_UNIT.test(unit)) continue
+    if (
+      SELECTION_FLOW.test(unit)
+      || SOURCE_APPLICATION_GUIDANCE.test(unit)
+      || QA_HEADING.test(unit)
+      || QUESTION_UNIT.test(unit)
+    ) continue
     if (STANDALONE_QA_ANSWER.test(unit)) continue
     if (isStaleClaim(unit, currentYear)) continue
     if (VAGUE_INCOME_CLAIM.test(unit) && !/[0-9０-９]/.test(unit)) continue
@@ -160,7 +170,7 @@ function catalogRole(
     return { key: 'equipment_mechanic', label: '建機・重機整備士' }
   }
   if (/板金|鈑金|塗装/.test(title)) return { key: 'bodywork', label: '板金・塗装スタッフ' }
-  if (/フロント|受付/.test(title) && /整備|工場|車検/.test(title)) {
+  if (/フロント|受付|一般事務|営業職/.test(title) && /整備|工場|車検|自動車/.test(title)) {
     return { key: 'service_front', label: '整備工場フロント' }
   }
   if (category === 'mechanic' || /整備士|メカニック/.test(title)) {
@@ -233,6 +243,7 @@ export function buildCatalogDescription(
   const benefits = compactSection(input.descriptionBenefits, 110, currentYear)
   const hours = compactSection(input.workHours, 80, currentYear)
   const holidays = compactSection(input.holidays, 80, currentYear)
+  const disclosure = input.disclosure || PM_AGENT_DISCLOSURE
 
   const blocks: string[] = []
   if (summary) blocks.push(summary)
@@ -243,12 +254,12 @@ export function buildCatalogDescription(
   addBlock(blocks, '待遇', benefits)
   addBlock(blocks, '勤務時間', hours)
   addBlock(blocks, '休日', holidays)
-  blocks.push(PM_AGENT_DISCLOSURE)
+  blocks.push(disclosure)
 
   let output = normalizeWhitespace(blocks.join('\n\n'))
   if (output.length <= CATALOG_DESCRIPTION_MAX_LENGTH) return output
 
-  const disclosureSuffix = `\n\n${PM_AGENT_DISCLOSURE}`
+  const disclosureSuffix = `\n\n${disclosure}`
   output = `${clipAtBoundary(
     output.slice(0, Math.max(1, output.lastIndexOf(disclosureSuffix))),
     CATALOG_DESCRIPTION_MAX_LENGTH - disclosureSuffix.length,
@@ -260,7 +271,11 @@ function hasBalancedLocation(title: string): boolean {
   return (title.match(/（/g) || []).length === (title.match(/）/g) || []).length
 }
 
-export function validateCatalogCopy(title: string, description: string): string[] {
+export function validateCatalogCopy(
+  title: string,
+  description: string,
+  options: { requiredDisclosure?: string } = {},
+): string[] {
   const issues: string[] = []
   if (!title || title.length > CATALOG_TITLE_MAX_LENGTH) issues.push('title_length')
   if (/[\/／]/.test(title)) issues.push('title_slash')
@@ -272,7 +287,12 @@ export function validateCatalogCopy(title: string, description: string): string[
   if (QA_ANSWER_VOICE.test(description)) issues.push('qa_answer_voice')
   if (/[＼\\]/.test(description)) issues.push('decorative_callout')
   if (SELECTION_FLOW.test(description.replace(PM_AGENT_DISCLOSURE, ''))) issues.push('selection_flow_bloat')
-  if (!description.includes(PM_AGENT_DISCLOSURE)) issues.push('missing_agency_disclosure')
+  const requiredDisclosure = options.requiredDisclosure || PM_AGENT_DISCLOSURE
+  if (SOURCE_APPLICATION_GUIDANCE.test(description.replace(requiredDisclosure, ''))) {
+    issues.push('source_application_guidance')
+  }
+  if (DISCRIMINATORY_JOB_CONDITION.test(description)) issues.push('discriminatory_job_condition')
+  if (!description.includes(requiredDisclosure)) issues.push('missing_agency_disclosure')
   return issues
 }
 

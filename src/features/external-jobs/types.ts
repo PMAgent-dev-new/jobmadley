@@ -11,6 +11,8 @@ export interface ExternalJob {
   hwOffice?: string
   title?: string
   companyName?: string
+  /** 実名を返さず、公開本文の伏せ字に使う社名を取得できたことだけを示す。 */
+  companyRedactionVerified?: boolean
   prefecture?: string
   municipalityName?: string
   address?: string

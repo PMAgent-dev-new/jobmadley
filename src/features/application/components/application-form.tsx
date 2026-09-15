@@ -9,7 +9,6 @@ import SiteHeader from "@/shared/components/site-header"
 import SiteFooter from "@/shared/components/site-footer"
 import type { ApplicationFormData } from "@/features/application/types"
 import type { JobDetail } from "@/features/jobs/types"
-import { isExternalJobId } from "@/features/external-jobs/apply-id"
 import { applicationFormSchema, type ApplicationFormValues } from "@/features/application/schema"
 import { useApplySourceCapture } from "@/features/application/hooks/useApplySourceCapture"
 import {
@@ -28,11 +27,20 @@ import { isMetaCatalogJob } from "@/shared/lib/catalog-eligibility"
 
 export interface ApplicationFormProps {
   job: JobDetail | null
+  /** Metaカタログのid。応募用の内部ID（hw-...）と異なる場合に明示する。 */
+  /** null は「この求人はカタログ商品ではない」を明示する。undefined は自社求人の従来判定。 */
+  catalogItemId?: string | null
+  mode?: "apply" | "consult"
+  /** Lark等に保存する求人詳細URL。未指定時は現在の応募ページURL。 */
+  jobDetailPath?: string
 }
 
-export default function ApplicationForm({ job }: ApplicationFormProps) {
-  // 外部求人はMetaカタログに存在しないIDのため content_ids に載せない（カタログ計測の破損防止）
-  const catalogEligible = job ? isMetaCatalogJob(job) && !isExternalJobId(job.id) : false
+export default function ApplicationForm({ job, catalogItemId, mode = "apply", jobDetailPath }: ApplicationFormProps) {
+  const catalogEligible = catalogItemId !== undefined
+    ? Boolean(catalogItemId)
+    : Boolean(job && isMetaCatalogJob(job))
+  const trackedItemId = catalogItemId || job?.id
+  const isConsult = mode === "consult"
   const {
     register,
     handleSubmit,
@@ -52,17 +60,17 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
   useEffect(() => {
     if (job?.id) {
       trackMeta("AddToCart", {
-        contentIds: catalogEligible ? [job.id] : undefined,
+        contentIds: catalogEligible && trackedItemId ? [trackedItemId] : undefined,
         contentName: job.jobName ?? undefined,
         value: 0,
         currency: "JPY",
       })
       trackGa4("add_to_cart", {
-        items: [{ item_id: job.id, item_name: job.jobName ?? undefined }],
+        items: [{ item_id: trackedItemId || job.id, item_name: job.jobName ?? undefined }],
         value: 0,
       })
     }
-  }, [catalogEligible, job?.id, job?.jobName])
+  }, [catalogEligible, job?.id, job?.jobName, trackedItemId])
 
   const onSubmit = async (data: ApplicationFormValues) => {
     if (isLoading) return
@@ -81,7 +89,7 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
         utmFirstTouchAt,
         fbclid,
         gclid,
-      } = resolveApplyContext()
+      } = resolveApplyContext(jobDetailPath)
 
       const applicationData: ApplicationFormData = {
         lastName: data.lastName,
@@ -105,6 +113,7 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
         utmFirstTouchAt,
         fbclid,
         gclid,
+        applicationIntent: isConsult ? "consult" : "apply",
       }
 
       const metaEventId = genEventId()
@@ -120,7 +129,7 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
       trackMeta(
         "Lead",
         {
-          contentIds: catalogEligible && job?.id ? [job.id] : undefined,
+          contentIds: catalogEligible && trackedItemId ? [trackedItemId] : undefined,
           contentName: job?.jobName ?? undefined,
           value: 0,
           currency: "JPY",
@@ -130,11 +139,11 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
       // GA4 側も同じタイミングで generate_lead を送る。GA4 のキーイベントに登録すると
       // チャネル別のCVとして集計できる（Meta だけが応募を観測している状態の解消）。
       trackGa4("generate_lead", {
-        items: job?.id ? [{ item_id: job.id, item_name: job.jobName ?? undefined }] : undefined,
+        items: trackedItemId ? [{ item_id: trackedItemId, item_name: job?.jobName ?? undefined }] : undefined,
         value: 0,
       })
 
-      if (applicationSource === "standby" && !hasPushedStandbyCv.current) {
+      if (!isConsult && applicationSource === "standby" && !hasPushedStandbyCv.current) {
         pushStandbyCv({
           jobId: job?.id ?? "",
           jobName: job?.jobName ?? "",
@@ -146,7 +155,7 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
       }
       window.location.assign(resolveApplicationCompleteUrl(job?.applyEmail))
     } catch (err) {
-      alert("応募送信に失敗しました")
+      alert(isConsult ? "相談内容の送信に失敗しました" : "応募送信に失敗しました")
     } finally {
       setIsLoading(false)
     }
@@ -167,7 +176,7 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
         {/* 求人情報表示 */}
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold mb-2">
-            {job?.companyName} {job?.jobName} に応募する
+            {job?.companyName} {job?.jobName} {isConsult ? "について相談する" : "に応募する"}
           </h1>
         </div>
 
@@ -196,7 +205,7 @@ export default function ApplicationForm({ job }: ApplicationFormProps) {
                 disabled={isSubmitting || isLoading}
                 className="bg-red-500 hover:bg-red-600 text-white px-12 py-3 rounded-md text-lg font-medium"
               >
-                {(isSubmitting || isLoading) ? "送信中..." : "応募する"}
+                {(isSubmitting || isLoading) ? "送信中..." : isConsult ? "RIDE JOBに相談する" : "応募する"}
               </Button>
             </div>
           </form>

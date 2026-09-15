@@ -36,9 +36,10 @@ const UTM_KEYS = [
 /** クリック ID。form_applicant は現状読まないが、Pixel 側の再構成に使われるため落とさない。 */
 const CLICK_IDS = ["gclid", "fbclid"]
 
-function buildEntryHref(): string {
+function buildEntryHref(baseHref: string): string {
   const current = new URLSearchParams(window.location.search)
-  const out = new URLSearchParams()
+  const base = new URL(baseHref, window.location.origin)
+  const out = new URLSearchParams(base.search)
 
   for (const k of UTM_KEYS) {
     const v = current.get(k)
@@ -65,15 +66,17 @@ function buildEntryHref(): string {
   }
 
   const qs = out.toString()
-  return qs ? `/entry?${qs}` : "/entry"
+  return `${base.pathname}${qs ? `?${qs}` : ""}${base.hash}`
 }
 
 export default function EntryCtaLink({
   className,
   children,
+  href = "/entry",
 }: {
   className?: string
   children: React.ReactNode
+  href?: string
 }) {
   // SSRとクライアント初回描画を一致させるため素の /entry を描画し、
   // ハイドレーション後に href だけDOMで書き換える。
@@ -82,19 +85,19 @@ export default function EntryCtaLink({
 
   useEffect(() => {
     const el = ref.current
-    if (el) el.href = buildEntryHref()
-  }, [])
+    if (el) el.href = buildEntryHref(href)
+  }, [href])
 
   return (
     <a
       ref={ref}
-      href="/entry"
+      href={href}
       className={className}
       // ハイドレーション直後にクリックされた場合や、UTMCapture の effect が
       // 後に走った場合に備えて遷移直前に組み立て直す。
       // preventDefault しないので cmd+クリック・新規タブも壊れない。
       onClick={(e) => {
-        e.currentTarget.href = buildEntryHref()
+        e.currentTarget.href = buildEntryHref(href)
       }}
     >
       {children}

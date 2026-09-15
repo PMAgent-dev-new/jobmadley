@@ -21,4 +21,6 @@ export interface ApplicationFormData {
   utmFirstTouchAt?: string
   fbclid?: string
   gclid?: string
+  /** 外部転載求人は求人企業への直接応募ではなく、RIDE JOBへの転職相談。 */
+  applicationIntent?: "apply" | "consult"
 }

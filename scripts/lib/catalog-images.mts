@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto'
 import sharp from 'sharp'
-import { list, put } from '@vercel/blob'
+import type { SupabaseCatalogStorage } from './catalog-storage.mts'
 
+// 画像は不変URLで保存する。描画ロジックを変える場合はこの版を上げ、旧フィードが
+// 参照する画像を上書きしないこと（この実装からupsert=falseを強制）。
 const IMAGE_VERSION = 'v5'
 const IMAGE_PREFIX = `catalog/images/${IMAGE_VERSION}/`
 const OUTPUT_SIZE = 1080
@@ -12,6 +14,8 @@ const MAX_BYTES = 8 * 1024 * 1024
 export type CatalogImageSpec = {
   id: string
   sourceUrl: string
+  /** 求人データから組み立てたSVG。外部画像を使わず求人ごとに固有化する場合に使用する。 */
+  sourceSvg?: string
   fallbackSourceUrl?: string
   category: string
   roleLabel?: string
@@ -38,6 +42,7 @@ function normalizedSpec(spec: CatalogImageSpec): CatalogImageSpec {
   return {
     id: String(spec.id || '').trim(),
     sourceUrl: canonicalImageSource(spec.sourceUrl),
+    sourceSvg: String(spec.sourceSvg || '').trim() || undefined,
     fallbackSourceUrl: canonicalImageSource(spec.fallbackSourceUrl || '') || undefined,
     category: String(spec.category || '').trim(),
     roleLabel: String(spec.roleLabel || '').trim(),
@@ -112,7 +117,9 @@ function categoryLabel(category: string): string {
 function renderInfoPanel(spec: CatalogImageSpec): Buffer {
   const titleLines = wrapVisual(spec.title, 22, 2)
   const titleY = titleLines.length === 1 ? [164] : [127, 185]
-  const salary = truncateVisual(spec.salary || spec.employmentType || '条件は詳細ページへ', 14)
+  const salary = truncateVisual(spec.salary || spec.employmentType || '条件は詳細ページへ', 11)
+  // 黄色枠の実効幅350pxへ収まるよう、文字種を考慮した幅からフォントサイズを決める。
+  const salaryFontSize = Math.max(28, Math.min(42, Math.floor(350 / Math.max(1, visualWidth(salary)))))
   const company = truncateVisual(spec.company || '勤務先は求人詳細へ', 31)
   const location = truncateVisual(
     [spec.location, spec.employmentType].filter(Boolean).join('　') || '勤務地は詳細ページへ',
@@ -137,7 +144,7 @@ function renderInfoPanel(spec: CatalogImageSpec): Buffer {
       <text x="48" y="232" font-size="27" font-weight="700" fill="#64748b">${escapeXml(company)}</text>
       <text x="48" y="322" font-size="29" font-weight="700" fill="#334155">${escapeXml(location)}</text>
       <rect x="638" y="255" width="394" height="78" rx="6" fill="#ffdd2d"/>
-      <text x="1010" y="310" text-anchor="end" font-size="42" font-weight="900" fill="#0b2c69">${escapeXml(salary)}</text>
+      <text x="1010" y="310" text-anchor="end" font-size="${salaryFontSize}" font-weight="900" fill="#0b2c69">${escapeXml(salary)}</text>
     </svg>
   `)
 }
@@ -149,6 +156,9 @@ function renderInfoPanel(spec: CatalogImageSpec): Buffer {
 export async function renderCatalogCreative(input: Buffer, spec: CatalogImageSpec): Promise<Buffer> {
   const meta = await sharp(input, { failOn: 'error' }).metadata()
   if (!meta.width || !meta.height) throw new Error('画像サイズを取得できません')
+  const generatedVector = Boolean(spec.sourceSvg)
+  const quality = generatedVector ? 82 : 90
+  const chromaSubsampling = generatedVector ? '4:2:0' : '4:4:4'
 
   const photo = await sharp(input)
     .rotate()
@@ -156,7 +166,7 @@ export async function renderCatalogCreative(input: Buffer, spec: CatalogImageSpe
       fit: 'cover',
       position: 'north',
     })
-    .jpeg({ quality: 90, chromaSubsampling: '4:4:4' })
+    .jpeg({ quality, chromaSubsampling })
     .toBuffer()
 
   const output = await sharp({
@@ -171,7 +181,7 @@ export async function renderCatalogCreative(input: Buffer, spec: CatalogImageSpe
       { input: photo, left: 0, top: 0 },
       { input: renderInfoPanel(spec), left: 0, top: PHOTO_HEIGHT },
     ])
-    .jpeg({ quality: 90, chromaSubsampling: '4:4:4', mozjpeg: true })
+    .jpeg({ quality, chromaSubsampling, mozjpeg: true })
     .toBuffer()
 
   const outMeta = await sharp(output).metadata()
@@ -204,25 +214,81 @@ async function fetchSourceImage(url: string): Promise<Buffer> {
   throw new Error(`元画像の取得に失敗しました: ${url}`, { cause: lastError })
 }
 
-async function listExistingImages(token: string): Promise<Map<string, string>> {
+async function listExistingImages(storage: SupabaseCatalogStorage): Promise<Map<string, string>> {
   const found = new Map<string, string>()
-  let cursor: string | undefined
-  do {
-    const result = await list({ prefix: IMAGE_PREFIX, limit: 1_000, cursor, token })
-    for (const blob of result.blobs) found.set(blob.pathname, blob.url)
-    cursor = result.hasMore ? result.cursor : undefined
-  } while (cursor)
+  const images = await storage.listDirectory(IMAGE_PREFIX)
+  for (const image of images) {
+    if (image.isDirectory || !image.pathname.endsWith('.jpg')) continue
+    if (!Number.isSafeInteger(image.size) || Number(image.size) < 1_024) {
+      throw new Error(`既存カタログ画像のサイズを検証できません: ${image.pathname}`)
+    }
+    if (image.contentType && image.contentType !== 'image/jpeg') {
+      throw new Error(`既存カタログ画像の形式がJPEGではありません: ${image.pathname}`)
+    }
+    found.set(image.pathname, image.url)
+  }
   return found
 }
 
+async function assertPublicCatalogImage(
+  pathname: string,
+  storage: SupabaseCatalogStorage,
+  expected?: Buffer,
+): Promise<void> {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const bytes = await storage.readPublic(pathname)
+      if (bytes.byteLength < 1_024 || bytes.byteLength > MAX_BYTES) {
+        throw new Error(`公開画像のサイズが不正です: ${bytes.byteLength} bytes`)
+      }
+      if (expected && !bytes.equals(expected)) {
+        throw new Error('アップロード前後の画像ハッシュが一致しません')
+      }
+      const metadata = await sharp(bytes).metadata()
+      if (metadata.format !== 'jpeg' || metadata.width !== OUTPUT_SIZE || metadata.height !== OUTPUT_SIZE) {
+        throw new Error(`公開画像の形式または寸法が不正です: ${metadata.format} ${metadata.width}x${metadata.height}`)
+      }
+      // キャッシュ済み画像はローカルの期待バイト列が無いため、全画素をデコードして破損も検出する。
+      if (!expected) await sharp(bytes).stats()
+      return
+    } catch (error) {
+      lastError = error
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 750))
+    }
+  }
+  throw new Error(
+    `公開カタログ画像を検証できません: ${pathname}`,
+    { cause: lastError },
+  )
+}
+
+async function putImageWithRetry(path: string, output: Buffer, storage: SupabaseCatalogStorage) {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await storage.put(path, output, {
+        upsert: false,
+        contentType: 'image/jpeg',
+        // 求人データと描画版を含む不変パス。長期キャッシュしても内容は変わらない。
+        cacheControl: 31_536_000,
+      })
+    } catch (error) {
+      lastError = error
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 1_000))
+    }
+  }
+  throw lastError
+}
+
 type PrepareOptions = {
-  token: string
+  storage: SupabaseCatalogStorage
   force?: boolean
   concurrency?: number
   failOnError?: boolean
 }
 
-/** 求人IDと表示条件ごとに広告画像を一度だけ生成し、永続Blob URLを返す。 */
+/** 求人IDと表示条件ごとに広告画像を一度だけ生成し、Supabase Storageの不変URLを返す。 */
 export async function prepareCatalogImages(
   imageSpecs: CatalogImageSpec[],
   options: PrepareOptions,
@@ -230,21 +296,43 @@ export async function prepareCatalogImages(
   const specs = [...new Map(
     imageSpecs
       .map(normalizedSpec)
-      .filter((spec) => spec.id && spec.sourceUrl)
+      .filter((spec) => spec.id && (spec.sourceUrl || spec.sourceSvg))
       .map((spec) => [spec.id, spec]),
   ).values()]
-  const existing = options.force ? new Map<string, string>() : await listExistingImages(options.token)
+  if (options.force) {
+    throw new Error('カタログ画像は不変URLです。再生成にはIMAGE_VERSIONの更新が必要です')
+  }
+  const existing = await listExistingImages(options.storage)
   const result = new Map<string, string>()
   const pending: CatalogImageSpec[] = []
+  const cachedSpecs: Array<{ spec: CatalogImageSpec; path: string; url: string }> = []
 
   for (const spec of specs) {
     const path = catalogImagePath(spec)
     const cached = existing.get(path)
-    if (cached) result.set(spec.id, cached)
-    else pending.push(spec)
+    if (cached) {
+      cachedSpecs.push({ spec, path, url: cached })
+    } else pending.push(spec)
   }
 
+  let cachedNext = 0
+  const cachedWorker = async () => {
+    for (;;) {
+      const index = cachedNext
+      cachedNext += 1
+      if (index >= cachedSpecs.length) return
+      const cached = cachedSpecs[index]
+      await assertPublicCatalogImage(cached.path, options.storage)
+      result.set(cached.spec.id, cached.url)
+    }
+  }
+  await Promise.all(Array.from(
+    { length: Math.min(12, cachedSpecs.length || 1) },
+    () => cachedWorker(),
+  ))
+
   let next = 0
+  let completed = 0
   const failures: Array<{ id: string; reason: string }> = []
   const sourceCache = new Map<string, Promise<Buffer>>()
   const fetchCachedSource = (url: string): Promise<Buffer> => {
@@ -262,24 +350,27 @@ export async function prepareCatalogImages(
       const spec = pending[index]
       try {
         let input: Buffer
-        try {
-          input = await fetchCachedSource(spec.sourceUrl)
-        } catch (error) {
-          if (!spec.fallbackSourceUrl || spec.fallbackSourceUrl === spec.sourceUrl) throw error
-          console.warn(`[catalog-image] 承認画像を取得できないため求人詳細画像を使用: ${spec.id}`)
-          input = await fetchCachedSource(spec.fallbackSourceUrl)
+        if (spec.sourceSvg) {
+          input = Buffer.from(spec.sourceSvg)
+        } else {
+          try {
+            input = await fetchCachedSource(spec.sourceUrl)
+          } catch (error) {
+            if (!spec.fallbackSourceUrl || spec.fallbackSourceUrl === spec.sourceUrl) throw error
+            console.warn(`[catalog-image] 承認画像を取得できないため求人詳細画像を使用: ${spec.id}`)
+            input = await fetchCachedSource(spec.fallbackSourceUrl)
+          }
         }
         const output = await renderCatalogCreative(input, spec)
         const path = catalogImagePath(spec)
-        const blob = await put(path, output, {
-          access: 'public',
-          addRandomSuffix: false,
-          allowOverwrite: true,
-          contentType: 'image/jpeg',
-          token: options.token,
-        })
+        const blob = await putImageWithRetry(path, output, options.storage)
+        // Metaへ渡す前に公開URLから実体を読み戻し、生成バイト列との完全一致を確認する。
+        await assertPublicCatalogImage(path, options.storage, output)
         result.set(spec.id, blob.url)
-        console.log(`[catalog-image] generated ${index + 1}/${pending.length}: ${spec.id}`)
+        completed += 1
+        if (completed <= 10 || completed % 100 === 0 || completed === pending.length) {
+          console.log(`[catalog-image] generated ${completed}/${pending.length}: ${spec.id}`)
+        }
       } catch (error) {
         const reason = error instanceof Error ? error.message : 'unknown error'
         failures.push({ id: spec.id, reason })
@@ -290,7 +381,7 @@ export async function prepareCatalogImages(
 
   const workerCount = Math.max(1, Math.min(options.concurrency ?? 4, pending.length || 1))
   await Promise.all(Array.from({ length: workerCount }, worker))
-  console.log(`[catalog-image] jobs=${specs.length} / cached=${specs.length - pending.length} / generated=${pending.length}`)
+  console.log(`[catalog-image] jobs=${specs.length} / cached=${specs.length - pending.length} / generated=${completed}`)
   if (failures.length) {
     console.warn(`[catalog-image] held=${failures.length}`)
     if (options.failOnError) {

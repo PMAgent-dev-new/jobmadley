@@ -9,6 +9,15 @@
  */
 import { unstable_cache } from "next/cache"
 import { externalHubKey as hubKeyOf, HUB_MIN_EXTERNAL_JOBS as MIN_EXTERNAL } from "@/features/hub/lib/hub-qualify"
+import {
+  companyCore,
+  companyCoreWithoutBrackets,
+  companyAliases,
+  isWithheldCompanyName,
+  withheldExternalJobDescription,
+  withheldExternalJobTitle,
+  redactExternalJobText as redact,
+} from "@/features/external-jobs/redact"
 import type { ExternalJob } from "./types"
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "https://urvkgyohtqfxmymaivth.supabase.co"
@@ -22,9 +31,8 @@ const DETAIL_VIEW = "external_public_job_details"
 const REVALIDATE = 3600
 
 /**
- * 画面で使う列だけを取得する。取得元を示す列（source_name / source_url / hw_office）は
- * 表示しない方針のため、そもそも取りに行かない。取得するとレンダリング結果に含まれず
- * ともRSCペイロードへ載り、ページのソースから読めてしまう。
+ * 画面で使う列だけを取得する。source_name は出典明記、expires_at / last_seen は
+ * 掲載終了判定に必要。source_url・求人票画像・地図は取得しない。
  *
  * company_name はここでは取得するが、mapRow で **返さない**（2026-08-07 三木さん決定＝
  * 転載求人は社名を伏せる）。取得が必要なのは、社名が company_name 欄だけでなく
@@ -33,108 +41,19 @@ const REVALIDATE = 3600
  * 応募の社内通知にだけ実名が要るため、それは getExternalCompanyName がサーバー側で別取得する。
  */
 const SELECT_COLUMNS = [
-  "source", "source_id", "title", "title_full", "company_name", "prefecture", "municipality_name", "address",
+  "source", "source_id", "source_name", "title", "title_full", "company_name", "prefecture", "municipality_name", "address",
   "job_category", "employment_type", "salary_kind", "salary_min", "salary_max",
-  "salary_raw", "work_hours", "description",
+  "salary_raw", "work_hours", "description", "expires_at", "last_seen",
 ].join(",")
 
-/**
- * 社名の識別子部分（法人格と空白を除いた中核）。「株式会社 トッキュウ」→「トッキュウ」。
- * 1文字だと誤爆する（例「東」）ので2文字未満は伏せ字の対象にしない。
- */
-const companyCore = (name?: string): string => {
-  const c = (name ?? "")
-    .replace(/(株式会社|有限会社|合同会社|合資会社|合名会社|\(株\)|（株）|\(有\)|（有）)/g, "")
-    .replace(/[\s　]/g, "")
-  return c.length >= 2 ? c : ""
+export const __testing = {
+  redact,
+  companyCore,
+  companyCoreWithoutBrackets,
+  companyAliases,
+  isWithheldCompanyName,
+  mapRow,
 }
-
-const CORP_WORD = /(株式会社|有限会社|合同会社|合資会社|合名会社|\(株\)|（株）|\(有\)|（有）)/
-
-/**
- * 括弧で囲まれたブランド名・地域名を落とした中核。
- * 求人票のタイトルは登録社名と表記が違うことが多い:
- *   「車検のコバック」 株式会社リューツー → タイトルは「株式会社リューツー」
- *   株式会社ツクイ（長野）              → タイトルは「ツクイ松本」
- * companyCore だけでは括弧の中身が残って一致せず、社名がそのまま表示されていた。
- * 3文字未満は誤爆するので対象にしない。
- */
-const companyCoreWithoutBrackets = (name?: string): string => {
-  const c = (name ?? "")
-    .replace(/[「『（(\[][^」』）)\]]{1,20}[」』）)\]]/g, "")
-    .replace(/(株式会社|有限会社|合同会社|合資会社|合名会社|\(株\)|（株）|\(有\)|（有）)/g, "")
-    .replace(/[\s　]/g, "")
-  return c.length >= 3 ? c : ""
-}
-
-/**
- * 法人格語に**隣接**する固有名。登録社名と照合できない表記ゆれや、
- * 勤務先として書かれた別会社（「日本海水（株）構内」等）の受け皿。
- *
- * ⚠️ 法人格語との間に空白を挟ませないこと。挟ませると
- * 「自動車整備士 株式会社リューツー」で**職種名まで巻き込んで伏せる**（実データで確認）。
- * ⚠️ 後株を先に処理すること。前株を先にすると「日本海水（株）構内」で
- * 「（株）構内」を掴み、**社名を残したまま普通名詞「構内」を伏せる**（実データで確認）。
- */
-// ⚠️ 記号・鉤括弧を必ず除外する。除外が甘いと「〜会社「株式会社イマギイレ」」で
-//    `会社「株式会社` を社名と誤認し、**社名を残したまま前の文脈を食う**（実データで確認）。
-const CORP_NAME = "[^\\s　（）()／/、。・\\[\\]【】「」『』：:！!？?※★☆◆◇■□●○◎▲△▼▽〜～＊*＜＞<>；;，,＆&〒]{2,12}"
-const CORP_SUFFIXED = new RegExp(CORP_NAME + CORP_WORD.source, "g")
-const CORP_PREFIXED = new RegExp(CORP_WORD.source + CORP_NAME, "g")
-
-/**
- * 本文中に現れる社名を伏せる。表記ゆれ（社名内の空白）に対応するため空白を挟んだ形も消す。
- *
- * 実測（2026-09-02・掲載中30,716件）: この処理を通した後もタイトルに社名が残る行が26件あった。
- * 原因は登録社名と求人票の表記が違うこと（括弧付きブランド・登録名の方が長い・別会社）。
- * 出典非表示の運用方針に対する漏れなので、下の3段で塞ぐ。
- */
-const cleanupOrphanCorpWord = (text: string): string =>
-  text
-    .replace(new RegExp("非公開[\\s　]*" + CORP_WORD.source, "g"), "非公開")
-    .replace(new RegExp(CORP_WORD.source + "[\\s　]*非公開", "g"), "非公開")
-
-/**
- * 本文中に現れる社名を伏せる。表記ゆれ（社名内の空白）に対応するため空白を挟んだ形も消す。
- *
- * @param corpFallback 登録社名と照合できないときに「法人格語＋隣接語」を伏せるか。
- *
- * ⚠️ **タイトルにだけ true を渡すこと。** description のような地の文に掛けてはいけない。
- * 日本語には語の区切りに空白が無いので、`CORP_NAME` の {2,12} が「社名」ではなく
- * **法人格語の前後12文字の地の文**を掴む。本番実測で250行が壊れていた:
- *
- *   株式会社三井住友銀行の役員車や部長車の運転  →  非公開長車の運転
- *   ◆６０歳以上歓迎！◇（有）丸重にて          →  非公開にて（年齢条件が消える）
- *   スズキ株式会社の車両を整備します            →  非公開の車両を整備します
- *
- * 社名が漏れることより、求職者が**職種・勤務地・条件を読めなくなる**方が実害が大きい。
- * タイトルは「職種／社名」のように区切られた短文なので、この誤爆が起きにくい。
- */
-const redact = (
-  text: string | undefined,
-  name?: string,
-  { corpFallback = false }: { corpFallback?: boolean } = {},
-): string | undefined => {
-  if (!text) return text
-  let out = text
-  const full = (name ?? "").trim()
-  for (const n of [full, companyCore(name), companyCoreWithoutBrackets(name)].filter((x) => x.length >= 2)) {
-    const pat = n.split("").map((ch) => ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[\\s　]*")
-    out = out.replace(new RegExp(pat, "g"), "非公開")
-  }
-  // ⚠️ 孤立した法人格語の掃除は**フォールバックより先**に行う。
-  //    後にすると、名前照合で「非公開」になった隣の法人格語を起点にフォールバックが走り、
-  //    掃除で消えるはずだった語から前後の地の文を食う
-  //    （「株式会社非公開千歳支店での勤務と」がまるごと消えていた）。
-  out = cleanupOrphanCorpWord(out)
-  if (corpFallback) {
-    out = out.replace(CORP_SUFFIXED, "非公開").replace(CORP_PREFIXED, "非公開")
-    out = cleanupOrphanCorpWord(out)
-  }
-  return out.replace(/(非公開[\s　]*){2,}/g, "非公開")
-}
-
-export const __testing = { redact, companyCore, companyCoreWithoutBrackets }
 
 /**
  * 自社ハブの職種 slug → 外部の job_category 名。複数の外部カテゴリを1ハブに合流させる
@@ -183,6 +102,11 @@ function mapRow(r: Record<string, unknown>): ExternalJob {
   const company = str(r.company_name)
   const pref = str(r.prefecture)
   const muni = str(r.municipality_name)
+  const category = str(r.job_category)
+  const employmentType = str(r.employment_type)
+  const companyWithheld = isWithheldCompanyName(company)
+  const isMechanic = category === "自動車整備士" || category === "バイク整備士"
+  const safeSummaryOnly = isMechanic || companyWithheld || !company?.trim()
   return {
     source: String(r.source ?? ""),
     sourceId: String(r.source_id ?? ""),
@@ -193,22 +117,38 @@ function mapRow(r: Record<string, unknown>): ExternalJob {
     // ちょうど20字で意味が途中で切れていた（「…タクシー運転手／６０歳以」）。
     // 詳細ページの h1 から取り直した title_full があればそちらを使う。
     // 未取得の求人では NULL なので従来の title に落ちる（段階的バックフィル中のため）。
-    title: redact(str(r.title_full) || str(r.title), company, { corpFallback: true }),
+    // 原文のタイトル・本文には登録社名と一致しない店舗ブランドや
+    // 勤務先名が入る。公開値は構造化済みデータから作る安全な概要に限定する。
+    title: safeSummaryOnly
+      ? withheldExternalJobTitle(category)
+      : redact(str(r.title_full) || str(r.title), company, { corpFallback: true }),
     companyName: undefined,
+    // 社名そのものは返さず、匿名化の照合元を取得できた事実だけを渡す。
+    companyRedactionVerified: Boolean(company?.trim()),
     prefecture: pref,
     municipalityName: muni,
     // 生の住所は出さない。12.9%が番地まで載っており、検索すれば掲載企業が特定できるため
     // （社名を伏せる意味が無くなる）。市区町村までに丸める。municipality_name の付与率は98.7%で、
     // 未付与のときだけ都道府県まで。
     address: muni ? `${pref ?? ""}${muni}` : pref,
-    jobCategory: str(r.job_category),
-    employmentType: str(r.employment_type),
+    jobCategory: category,
+    employmentType,
     salaryKind: str(r.salary_kind),
     salaryMin: num(r.salary_min),
     salaryMax: num(r.salary_max),
     salaryRaw: str(r.salary_raw),
-    workHours: str(r.work_hours),
-    description: redact(str(r.description), company),
+    // 勤務時間の自由記述にも勤務先名・店舗ブランドが混ざる実例がある。
+    // 外部整備士は構造化した安全な概要だけを公開し、原文はRSCにも渡さない。
+    workHours: safeSummaryOnly ? undefined : str(r.work_hours),
+    // 社名が取れないと本文中の固有名詞を安全に伏せられないため、本文はfail-closedで非表示。
+    description: safeSummaryOnly
+      ? withheldExternalJobDescription({
+          category,
+          prefecture: pref,
+          municipality: muni,
+          employmentType,
+        })
+      : redact(str(r.description), company),
     receivedAt: str(r.received_at),
     expiresAt: str(r.expires_at),
     lastSeen: str(r.last_seen),
@@ -223,6 +163,7 @@ async function rawQuery(
   params: Record<string, string>,
   wantCount = false,
   view: string = VIEW,
+  noStore = false,
 ): Promise<{ rows: Record<string, unknown>[]; count: number; ok: boolean }> {
   const qs = new URLSearchParams(params).toString()
   const url = `${SUPABASE_URL}/rest/v1/${view}?${qs}`
@@ -232,7 +173,9 @@ async function rawQuery(
   }
   if (wantCount) headers.Prefer = "count=exact"
   try {
-    const res = await fetch(url, { headers, next: { revalidate: REVALIDATE } })
+    const res = await fetch(url, noStore
+      ? { headers, cache: "no-store", signal: AbortSignal.timeout(10_000) }
+      : { headers, next: { revalidate: REVALIDATE } })
     if (!res.ok) return { rows: [], count: 0, ok: false }
     const data = (await res.json()) as Record<string, unknown>[]
     let count = data.length
@@ -761,7 +704,7 @@ export const getExternalJobDetail = async (
   source: string,
   sourceId: string,
 ): Promise<Record<string, string> | null> => {
-  const { rows } = await rawQuery(
+  const detailResult = await rawQuery(
     {
       select: DETAIL_COLUMNS,
       source: `eq.${source}`,
@@ -771,9 +714,31 @@ export const getExternalJobDetail = async (
     false,
     DETAIL_VIEW,
   )
-  const r = rows[0]
+  if (!detailResult.ok) {
+    console.warn("[external-job] 詳細情報を取得できないため概要表示へ縮退します")
+    return null
+  }
+  const r = detailResult.rows[0]
   if (!r) return null
-  const company = await getExternalCompanyName(source, sourceId)
+  const companyResult = await rawQuery({
+    select: "company_name",
+    source: `eq.${source}`,
+    source_id: `eq.${sourceId}`,
+    limit: "1",
+  })
+  if (!companyResult.ok) {
+    // 企業名を照合できない状態で原文詳細を返さない。ページ本体は安全な概要で表示を続ける。
+    console.warn("[external-job] 伏せ字用企業情報を取得できないため概要表示へ縮退します")
+    return null
+  }
+  const companyValue = companyResult.rows[0]?.company_name
+  // 企業名が取れなければ詳細本文内の固有名詞を確実に伏せられないため、概要だけを表示する。
+  if (
+    typeof companyValue !== "string"
+    || !companyValue.trim()
+    || isWithheldCompanyName(companyValue)
+  ) return null
+  const company = companyValue.trim()
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(r)) {
     if (typeof v !== "string" || !v.trim()) continue
@@ -793,13 +758,14 @@ export const getExternalCompanyName = async (
   source: string,
   sourceId: string,
 ): Promise<string | undefined> => {
-  const { rows } = await rawQuery({
+  const result = await rawQuery({
     select: "company_name",
     source: `eq.${source}`,
     source_id: `eq.${sourceId}`,
     limit: "1",
   })
-  const v = rows[0]?.company_name
+  if (!result.ok) throw new Error("外部求人の企業情報を取得できませんでした")
+  const v = result.rows[0]?.company_name
   return typeof v === "string" && v ? v : undefined
 }
 
@@ -807,11 +773,39 @@ export const getExternalJob = async (
   source: string,
   sourceId: string,
 ): Promise<ExternalJob | null> => {
-  const { rows } = await query({
+  const result = await query({
     select: SELECT_COLUMNS,
     source: `eq.${source}`,
     source_id: `eq.${sourceId}`,
     limit: "1",
   })
-  return rows[0] ?? null
+  if (!result.ok) throw new Error("外部求人情報を取得できませんでした")
+  return result.rows[0] ?? null
+}
+
+/**
+ * 応募受付直前のサーバー検証用。障害（ok=false）と不存在（job=null）を分け、
+ * ブラウザから送られた社名・職種・期限を信用せず一次データで上書きできるようにする。
+ */
+export const getExternalJobForSubmission = async (
+  source: string,
+  sourceId: string,
+): Promise<{ ok: boolean; job: ExternalJob | null; companyName?: string }> => {
+  let result: Awaited<ReturnType<typeof rawQuery>> = { rows: [], count: 0, ok: false }
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    result = await rawQuery({
+      select: SELECT_COLUMNS,
+      source: `eq.${source}`,
+      source_id: `eq.${sourceId}`,
+      limit: "1",
+    }, false, VIEW, true)
+    if (result.ok) break
+    if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 250))
+  }
+  const row = result.rows[0]
+  return {
+    ok: result.ok,
+    job: row ? mapRow(row) : null,
+    companyName: typeof row?.company_name === "string" && row.company_name ? row.company_name : undefined,
+  }
 }

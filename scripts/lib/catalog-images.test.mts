@@ -4,6 +4,7 @@ import sharp from 'sharp'
 import {
   canonicalImageSource,
   catalogImagePath,
+  prepareCatalogImages,
   renderCatalogCreative,
   type CatalogImageSpec,
 } from './catalog-images.mts'
@@ -33,6 +34,7 @@ test('catalogImagePath is stable and changes with job-specific content', () => {
   assert.equal(catalogImagePath(spec), catalogImagePath({ ...spec }))
   assert.notEqual(catalogImagePath(spec), catalogImagePath({ ...spec, id: 'job-002' }))
   assert.notEqual(catalogImagePath(spec), catalogImagePath({ ...spec, salary: '月給30万円' }))
+  assert.notEqual(catalogImagePath(spec), catalogImagePath({ ...spec, sourceSvg: '<svg></svg>' }))
 })
 
 test('renderCatalogCreative produces a native 1080x1080 JPEG with an information panel', async () => {
@@ -54,4 +56,50 @@ test('renderCatalogCreative produces a native 1080x1080 JPEG with an information
 
   const panelPixel = await sharp(output).extract({ left: 10, top: 730, width: 1, height: 1 }).raw().toBuffer()
   assert.ok(panelPixel[2] > panelPixel[0], 'information panel should start with the blue RIDEJOB band')
+})
+
+test('prepareCatalogImages rejects a zero-byte cached image', async () => {
+  const path = catalogImagePath(spec)
+  const storage = {
+    listDirectory: async () => [{
+      pathname: path,
+      url: `https://example.supabase.co/storage/v1/object/public/meta-catalog/${path}`,
+      size: 0,
+      isDirectory: false,
+    }],
+  }
+  await assert.rejects(
+    prepareCatalogImages([spec], { storage: storage as never, failOnError: true }),
+    /既存カタログ画像のサイズを検証できません/,
+  )
+})
+
+test('prepareCatalogImages reads and decodes a cached image from its public URL', async () => {
+  const path = catalogImagePath(spec)
+  const cached = await sharp({
+    create: {
+      width: 1080,
+      height: 1080,
+      channels: 3,
+      background: { r: 20, g: 30, b: 40 },
+    },
+  }).jpeg().toBuffer()
+  let publicReads = 0
+  const url = `https://example.supabase.co/storage/v1/object/public/meta-catalog/${path}`
+  const storage = {
+    listDirectory: async () => [{
+      pathname: path,
+      url,
+      size: cached.byteLength,
+      contentType: 'image/jpeg',
+      isDirectory: false,
+    }],
+    readPublic: async () => {
+      publicReads += 1
+      return cached
+    },
+  }
+  const result = await prepareCatalogImages([spec], { storage: storage as never, failOnError: true })
+  assert.equal(result.get(spec.id), url)
+  assert.equal(publicReads, 1)
 })

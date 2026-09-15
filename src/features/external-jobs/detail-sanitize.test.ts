@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
-import { test } from 'vitest'
+import { afterEach, test, vi } from 'vitest'
 
-import { sanitizeDetailValue, EXTERNAL_DETAIL_GROUPS } from './api'
+import { getExternalJobDetail, sanitizeDetailValue, EXTERNAL_DETAIL_GROUPS } from './api'
+
+afterEach(() => vi.restoreAllMocks())
 
 /**
  * 転載求人の詳細ページ。以前は求人票の原文をそのまま出しており、実測（23,219件）で
@@ -60,4 +62,18 @@ test('★応募書類（application_docs）は表示項目から外れている'
   // 内容も「紹介状を郵送してください」という直接応募の案内で、当社の応募導線と矛盾する。
   const shown = EXTERNAL_DETAIL_GROUPS.flatMap((g) => g.items.map(([col]) => col))
   assert.ok(!shown.includes('application_docs'), '応募書類が表示項目に残っている')
+})
+
+test('詳細API障害時は既存ページを500にせず安全な概要へ縮退する', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('temporary failure', { status: 503 }))
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+  assert.equal(await getExternalJobDetail('hellowork', '01010-23288061'), null)
+})
+
+test('企業名照合API障害時は原文詳細を返さない', async () => {
+  vi.spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(Response.json([{ work_content: '株式会社サンプルで整備します' }]))
+    .mockResolvedValueOnce(new Response('temporary failure', { status: 503 }))
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+  assert.equal(await getExternalJobDetail('hellowork', '01010-23288061'), null)
 })

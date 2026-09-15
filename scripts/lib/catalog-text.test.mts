@@ -22,6 +22,20 @@ test('sanitizeCatalogText removes age limits used as application conditions', ()
   assert.equal(result.clean.includes('安全運転'), true)
 })
 
+test('sanitizeCatalogText removes explicit senior recruiting phrases even with retirement context', () => {
+  const source = [
+    '自動車の点検整備を担当します。',
+    '【６０歳以上応募歓迎（６０＠）】',
+    '定年は６５歳ですが、６５歳以上の方も応募可能です。',
+    '残業はありません。',
+  ].join('\n')
+  const result = sanitizeCatalogText(source)
+  assert.equal(result.clean.includes('６０歳以上'), false)
+  assert.equal(result.clean.includes('６５歳以上'), false)
+  assert.equal(result.clean.includes('自動車の点検整備'), true)
+  assert.equal(result.clean.includes('残業はありません'), true)
+})
+
 test('sanitizeCatalogText preserves benefit and re-employment explanations', () => {
   const source = 'こども手当は18歳まで支給します。\n定年65歳、再雇用制度で75歳まで勤務可能です。'
   const result = sanitizeCatalogText(source)
