@@ -24,6 +24,7 @@ export interface ApplicantMailInput {
   name?: string
   companyName?: string
   jobName?: string
+  intent?: "apply" | "consult"
 }
 
 type ProfileId = "cpone" | "mechanic" | "pmagent" | "default"
@@ -168,6 +169,29 @@ export const buildApplicantAutoReply = (
   const greetingName = input.name?.trim() ? input.name.trim() : "ご応募者"
   const c = company(input.companyName)
   const job = company(input.jobName)
+
+  if (input.intent === "consult" && profile.id === "mechanic") {
+    return {
+      to: input.email,
+      impersonateUser: profile.impersonateUser,
+      fromAddress: profile.fromAddress,
+      fromName: profile.fromName,
+      replyTo: profile.replyTo,
+      subject: "【ライドジョブメカニック】転職相談を受け付けました（面談日程のご案内）",
+      text: [
+        `${greetingName} 様`,
+        `この度は、${job ?? "掲載求人"}についてRIDE JOBへご相談いただき、誠にありがとうございます。`,
+        "ご希望条件や求人の詳細を確認するため、10～20分ほどwebまたは電話でお話を伺います。",
+        "これはハローワークへの直接応募ではありません。ご相談後、応募をご希望の場合は手続きをご案内します。",
+        "お手数ですが、以下のリンクより日程のご予約をお願いいたします。",
+        "https://leomeet.pmagent.jp/book/mec",
+        "また、ご相談内容を確認の上、下記の番号よりお電話させていただくことがございます。",
+        "・03-6824-7476",
+        "・070-9220-9305",
+        "それでは、引き続きどうぞよろしくお願いいたします。",
+      ].join("\n"),
+    }
+  }
 
   return {
     to: input.email,

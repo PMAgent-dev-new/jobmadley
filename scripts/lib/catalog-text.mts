@@ -4,6 +4,8 @@ const BENEFIT_CONTEXT =
 
 type Rule = { re: RegExp; action: 'drop' | 'replace'; unless?: RegExp }
 const RULES: Rule[] = [
+  // 「60歳以上応募可」のような明示的な募集条件は、同じ文に定年・経験の説明があっても除外する。
+  { re: /[0-9０-９]{1,3}\s*歳\s*(?:以上|以下|未満|まで)[^。\n！？]{0,30}(?:応募|募集|歓迎|採用)/g, action: 'drop' },
   // 応募条件としての上限年齢は、定年の説明が併記されていても広告から除外する。
   { re: /[0-9０-９]{1,3}\s*歳\s*(以下|未満)(の方|の人|歓迎|対象|応募|採用|限定)?/g, action: 'drop', unless: CHILD_BENEFIT_CONTEXT },
   { re: /[0-9０-９]{1,3}\s*歳\s*までに\s*入社/g, action: 'drop' },

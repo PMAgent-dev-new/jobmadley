@@ -50,6 +50,7 @@ function hostOf(input: unknown): string {
 const ALLOWLISTED_ENV: Record<string, string> = {
   // Lark 通知は Webhook 経路（LARK_CHAT_ID を設定しないことで im API ではなく Webhook を使う）
   LARK_WEBHOOK: "https://open.larksuite.com/open-apis/bot/v2/hook/aaaaaaaa",
+  LARK_WEBHOOK_MECHANIC: "https://open.larksuite.com/open-apis/bot/v2/hook/bbbbbbbb",
   // Base(bitable) 登録・lookup・認証に必要な Lark アプリ資格情報（ridejob サービスの fallback 経路）
   LARK_APP_ID: "test-app-id",
   LARK_APP_SECRET: "test-app-secret",
@@ -109,8 +110,31 @@ describe("submit-application POST — outbound host allowlist", () => {
     // 全経路が「成功」して次段へ進むよう、全消費者を満たすスーパーセット応答を返す。
     // status 202 は CPaaS が必須とする値（他モジュールは res.ok=2xx 判定なので 202 でも OK）。
     fetchSpy = vi.fn(
-      async () =>
-        new Response(
+      async (input: unknown) => {
+        if (hostOf(input) === "urvkgyohtqfxmymaivth.supabase.co") {
+          return new Response(JSON.stringify([{
+            source: "hellowork",
+            source_id: "13010-12345678",
+            source_name: "ハローワークインターネットサービス",
+            title: "自動車整備士",
+            title_full: "自動車整備士",
+            company_name: "山田自動車株式会社",
+            prefecture: "東京都",
+            municipality_name: "千代田区",
+            address: "東京都千代田区",
+            job_category: "自動車整備士",
+            employment_type: "正社員",
+            salary_kind: "月給",
+            salary_min: 250000,
+            salary_max: 350000,
+            salary_raw: "月給250,000円〜350,000円",
+            work_hours: "9:00〜18:00",
+            description: "自動車の点検・整備",
+            expires_at: "12月31日",
+            last_seen: "2099-09-15T00:00:00Z",
+          }]), { status: 200, headers: { "content-type": "application/json" } })
+        }
+        return new Response(
           JSON.stringify({
             code: 0,
             msg: "ok",
@@ -122,7 +146,8 @@ describe("submit-application POST — outbound host allowlist", () => {
             data: { record: { record_id: "rec1" }, items: [{ record_id: "rec1" }] },
           }),
           { status: 202, headers: { "content-type": "application/json" } },
-        ),
+        )
+      },
     )
     vi.stubGlobal("fetch", fetchSpy)
     // capi.ts などが module ロード時に env を snapshot するため、fresh な module graph を強制する。
@@ -152,15 +177,220 @@ describe("submit-application POST — outbound host allowlist", () => {
   it("covers the transcribed-job path, which resolves the company name server-side", async () => {
     const { POST } = await import("./route")
     const res = await POST(
-      makeRequest({ ...applicantBody, jobId: "hw-12345", companyName: undefined }),
+      makeRequest({
+        ...applicantBody,
+        // 公開カタログと同じraw IDでも、内部用`hw-`と同じ再検証経路を通す。
+        jobId: "13010-12345678",
+        companyName: undefined,
+        applicationIntent: "consult",
+      }),
     )
     expect(res.status).toBe(200)
 
     const hosts = fetchSpy.mock.calls.map((call) => hostOf(call[0]))
     expect(hosts).toContain("urvkgyohtqfxmymaivth.supabase.co")
+    const sourceValidationCall = fetchSpy.mock.calls.find(
+      (call) => hostOf(call[0]) === "urvkgyohtqfxmymaivth.supabase.co",
+    )
+    expect(sourceValidationCall?.[1]).toMatchObject({ cache: "no-store" })
 
     const offlist = hosts.filter((host) => !ALLOWED_HOSTS.has(host))
     expect(offlist, `unexpected outbound host(s): ${[...new Set(offlist)].join(", ")}`).toEqual([])
+
+    const calls = fetchSpy.mock.calls.map((call) => ({
+      host: hostOf(call[0]),
+      body: String((call[1] as RequestInit | undefined)?.body ?? ""),
+    }))
+    const larkBodies = calls.filter((call) => call.host === "open.larksuite.com").map((call) => call.body).join("\n")
+    expect(larkBodies).toContain("求人ID: 13010-12345678")
+    expect(larkBodies).toContain("/external-job/hellowork/13010-12345678")
+    expect(larkBodies).not.toContain("hw-13010-12345678")
+
+    const capiBody = calls.find((call) => call.host === "graph.facebook.com")?.body ?? ""
+    expect(capiBody).toContain('"content_ids":["13010-12345678"]')
+    expect(capiBody).not.toContain("hw-13010-12345678")
+  })
+
+  it("forces a mechanic external job into verified consultation even when the client sends apply", async () => {
+    const { POST } = await import("./route")
+    const res = await POST(
+      makeRequest({
+        ...applicantBody,
+        jobId: "hw-13010-12345678",
+        companyName: undefined,
+        applicationIntent: "apply",
+      }),
+    )
+    expect(res.status).toBe(200)
+
+    const sourceValidationCall = fetchSpy.mock.calls.find(
+      (call) => hostOf(call[0]) === "urvkgyohtqfxmymaivth.supabase.co",
+    )
+    expect(sourceValidationCall?.[1]).toMatchObject({ cache: "no-store" })
+    const bodies = fetchSpy.mock.calls
+      .map((call) => String((call[1] as RequestInit | undefined)?.body ?? ""))
+      .join("\n")
+    expect(bodies).toContain("転職相談")
+    expect(bodies).toContain('"content_ids":["13010-12345678"]')
+  })
+
+  it("keeps external mechanic consultation routing even when the listed employer matches CP One", async () => {
+    fetchSpy.mockImplementation(async (input: unknown) => {
+      if (hostOf(input) === "urvkgyohtqfxmymaivth.supabase.co") {
+        return new Response(JSON.stringify([{
+          source: "hellowork",
+          source_id: "13010-12345678",
+          title: "自動車整備士",
+          title_full: "自動車整備士",
+          company_name: "CP One Japan 整備株式会社",
+          prefecture: "東京都",
+          municipality_name: "千代田区",
+          job_category: "自動車整備士",
+          employment_type: "正社員",
+          salary_kind: "月給",
+          salary_min: 250000,
+          salary_max: 350000,
+          description: "自動車の点検・整備",
+          expires_at: "12月31日",
+          last_seen: "2099-09-15T00:00:00Z",
+        }]), { status: 200, headers: { "content-type": "application/json" } })
+      }
+      return new Response(JSON.stringify({
+        code: 0,
+        msg: "ok",
+        StatusCode: 0,
+        tenant_access_token: "test-tenant-token",
+        expire: 7200,
+        delivery_order_id: 123,
+        accepted_at: "2026-07-15T00:00:00+09:00",
+        data: { record: { record_id: "rec1" }, items: [{ record_id: "rec1" }] },
+      }), { status: 202, headers: { "content-type": "application/json" } })
+    })
+
+    const { POST } = await import("./route")
+    const res = await POST(makeRequest({
+      ...applicantBody,
+      jobId: "hw-13010-12345678",
+      companyName: undefined,
+      applicationIntent: "apply",
+    }))
+    expect(res.status).toBe(200)
+    const urls = fetchSpy.mock.calls.map((call) => String(call[0]))
+    expect(urls.some((url) => url.includes("/hook/bbbbbbbb"))).toBe(true)
+    expect(urls.some((url) => url.includes("/hook/aaaaaaaa"))).toBe(false)
+    const bodies = fetchSpy.mock.calls
+      .map((call) => String((call[1] as RequestInit | undefined)?.body ?? ""))
+      .join("\n")
+    expect(bodies).toContain("転職相談")
+    expect(bodies).not.toContain("CPONE")
+  })
+
+  it("keeps existing non-mechanic external jobs submittable as applications", async () => {
+    fetchSpy.mockImplementation(async (input: unknown) => {
+      if (hostOf(input) === "urvkgyohtqfxmymaivth.supabase.co") {
+        return new Response(JSON.stringify([{
+          source: "hellowork",
+          source_id: "13010-12345678",
+          source_name: "ハローワークインターネットサービス",
+          title: "トラックドライバー",
+          title_full: "トラックドライバー",
+          company_name: "山田運輸株式会社",
+          prefecture: "東京都",
+          municipality_name: "千代田区",
+          address: "東京都千代田区",
+          job_category: "トラックドライバー",
+          employment_type: "正社員",
+          salary_kind: "月給",
+          salary_min: 250000,
+          salary_max: 350000,
+          description: "配送業務",
+          expires_at: "12月31日",
+          last_seen: "2099-09-15T00:00:00Z",
+        }]), { status: 200, headers: { "content-type": "application/json" } })
+      }
+      return new Response(JSON.stringify({
+        code: 0,
+        msg: "ok",
+        StatusCode: 0,
+        tenant_access_token: "test-tenant-token",
+        expire: 7200,
+        delivery_order_id: 123,
+        accepted_at: "2026-07-15T00:00:00+09:00",
+        data: { record: { record_id: "rec1" }, items: [{ record_id: "rec1" }] },
+      }), { status: 202, headers: { "content-type": "application/json" } })
+    })
+
+    const { POST } = await import("./route")
+    const res = await POST(makeRequest({
+      ...applicantBody,
+      jobId: "hw-13010-12345678",
+      companyName: undefined,
+      applicationIntent: "apply",
+    }))
+    expect(res.status).toBe(200)
+
+    const larkBodies = fetchSpy.mock.calls
+      .filter((call) => hostOf(call[0]) === "open.larksuite.com")
+      .map((call) => String((call[1] as RequestInit | undefined)?.body ?? ""))
+      .join("\n")
+    // 求人名もクライアント入力ではなく一次データで上書きする。
+    expect(larkBodies).toContain("求人名: トラックドライバー")
+    expect(larkBodies).toContain("求人ID: hw-13010-12345678")
+    expect(larkBodies).not.toContain("転職相談")
+    const capiBody = fetchSpy.mock.calls
+      .find((call) => hostOf(call[0]) === "graph.facebook.com")?.[1]?.body
+    expect(String(capiBody ?? "")).not.toContain("content_ids")
+  })
+
+  it("rejects an expired external job even when the client sends apply", async () => {
+    fetchSpy.mockImplementation(async (input: unknown) => {
+      if (hostOf(input) === "urvkgyohtqfxmymaivth.supabase.co") {
+        return new Response(JSON.stringify([{
+          source: "hellowork",
+          source_id: "13010-12345678",
+          title: "自動車整備士",
+          job_category: "自動車整備士",
+          expires_at: "1月1日",
+          last_seen: "2025-01-01T00:00:00Z",
+        }]), { status: 200, headers: { "content-type": "application/json" } })
+      }
+      return new Response(JSON.stringify({ code: 0 }), { status: 200 })
+    })
+    const { POST } = await import("./route")
+    const res = await POST(makeRequest({
+      ...applicantBody,
+      jobId: "hw-13010-12345678",
+      companyName: undefined,
+      applicationIntent: "apply",
+    }))
+    expect(res.status).toBe(410)
+    expect(fetchSpy.mock.calls.map((call) => hostOf(call[0]))).toEqual([
+      "urvkgyohtqfxmymaivth.supabase.co",
+    ])
+  })
+
+  it("rejects a forged mechanic consultation request for a non-mechanic external job", async () => {
+    fetchSpy.mockImplementation(async (input: unknown) => {
+      if (hostOf(input) === "urvkgyohtqfxmymaivth.supabase.co") {
+        return new Response(JSON.stringify([{
+          source: "hellowork",
+          source_id: "13010-12345678",
+          title: "トラックドライバー",
+          job_category: "トラックドライバー",
+          expires_at: "12月31日",
+          last_seen: "2099-09-15T00:00:00Z",
+        }]), { status: 200, headers: { "content-type": "application/json" } })
+      }
+      return new Response(JSON.stringify({ code: 0 }), { status: 200 })
+    })
+    const { POST } = await import("./route")
+    const res = await POST(makeRequest({
+      ...applicantBody,
+      jobId: "hw-13010-12345678",
+      companyName: undefined,
+      applicationIntent: "consult",
+    }))
+    expect(res.status).toBe(400)
   })
 
   it("actually exercises the Lark, SMS log and CAPI paths (guard is not vacuous)", async () => {

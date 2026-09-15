@@ -52,15 +52,22 @@ export const buildBookingUrl = (channel: SmsChannel, ref: string): string => {
  * 応募者向けSMS本文。改行は CRLF（端末で LF だけだと改行されないことがある）。
  * 職種を断定しない中立文面（channel は予約枠/slug の決定にのみ使う）。
  */
-export const buildMessage = (args: { applicantName?: string | null; url: string }): string => {
+export const buildMessage = (args: {
+  applicantName?: string | null
+  url: string
+  intent?: "apply" | "consult"
+}): string => {
   const name = (args.applicantName ?? "").trim()
-  const nameLine = name ? `${name}様` : "ご応募ありがとうございます"
+  const consult = args.intent === "consult"
+  const nameLine = name ? `${name}様` : consult ? "転職相談ありがとうございます" : "ご応募ありがとうございます"
   return [
     nameLine,
     "",
-    "RIDEJOBへご応募いただきありがとうございます。",
+    consult ? "RIDE JOBへ転職相談をお申し込みいただきありがとうございます。" : "RIDEJOBへご応募いただきありがとうございます。",
     "",
-    "次のステップ（カジュアル面談・20分・履歴書不要）のご案内です。以下よりご予約ください。",
+    consult
+      ? "ご希望条件と求人詳細を確認する面談（20分・履歴書不要）のご案内です。以下よりご予約ください。"
+      : "次のステップ（カジュアル面談・20分・履歴書不要）のご案内です。以下よりご予約ください。",
     "",
     "▼面談予約はこちら",
     args.url,
@@ -90,6 +97,7 @@ export const sendApplicantSms = async (
     applicantId?: string | null
     /** eeasy 記録上の媒体ラベル（meta / kyujinbox 等。任意） */
     media?: string
+    intent?: "apply" | "consult"
   },
   context: string,
 ): Promise<SmsResult> => {
@@ -103,7 +111,7 @@ export const sendApplicantSms = async (
 
   const ref = buildRef(input.channel, input.applicantId)
   const url = buildBookingUrl(input.channel, ref)
-  const text = buildMessage({ applicantName: input.applicantName, url })
+  const text = buildMessage({ applicantName: input.applicantName, url, intent: input.intent })
 
   const send = await sendShortMessage({ to, text, userReference: ref, clickTracking: true }, context)
   if (!send.ok || !send.deliveryOrderId) {

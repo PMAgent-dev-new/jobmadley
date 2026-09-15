@@ -3,7 +3,7 @@ import { test } from 'vitest'
 
 import { __testing } from './api'
 
-const { redact } = __testing
+const { redact, mapRow } = __testing
 
 /** タイトル用の呼び出し。description には corpFallback を掛けない（下のブロック参照）。 */
 const redactTitle = (t: string, n?: string) => redact(t, n, { corpFallback: true })
@@ -32,6 +32,53 @@ test('括弧付きのブランド名・地域名がある登録社名でも伏�
     '送迎ドライバー／デイサービス／パート／非公開松本')
   assert.equal(redact('二級自動車整備士／イエローハットゆめタウン店', 'イエローハット（株式会社エヌ・アール）'),
     '二級自動車整備士／非公開ゆめタウン店')
+  // ブランドが社名の括弧内にだけある場合も伏せる。
+  assert.equal(redact('自動車検査員（富山県内のイエローハット各店）', '株式会社 ピア（イエローハット）'),
+    '自動車検査員（富山県内の非公開各店）')
+})
+
+test('会社名欄の括弧内が都道府県注記なら勤務地を伏せない', () => {
+  assert.equal(redact('長野県松本市の送迎ドライバー', '株式会社サンプル（長野県）'),
+    '長野県松本市の送迎ドライバー')
+})
+
+test('事業所名が非公開の行は企業を特定できる原文を公開しない', () => {
+  const row = mapRow({
+    source: 'hellowork',
+    source_id: '20111-04745161',
+    source_name: 'ハローワークインターネットサービス',
+    title: '整備士',
+    company_name: '（事業所の意向により公開していません）',
+    prefecture: '長野県',
+    municipality_name: '北佐久郡軽井沢町',
+    job_category: '自動車整備士',
+    employment_type: '正社員',
+    description: '草軽交通株式会社「軽井沢整備工場」で各種自動車を整備します。',
+  })
+  assert.equal(row.companyRedactionVerified, true)
+  assert.equal(row.title, '自動車整備士')
+  assert.ok(row.description?.includes('掲載企業名と企業を特定できる仕事内容は公開していません'))
+  assert.ok(!row.description?.includes('草軽交通'))
+})
+
+test('登録社名と異なる店舗ブランドも公開値に出さない', () => {
+  const row = mapRow({
+    source: 'hellowork',
+    source_id: '01010-25777561',
+    source_name: 'ハローワークインターネットサービス',
+    title_full: '自動車整備士（ホンダカーズ西釧路）',
+    company_name: 'ＳＷＣホンダ株式会社',
+    prefecture: '北海道',
+    municipality_name: '標津郡中標津町',
+    job_category: '自動車整備士',
+    employment_type: '正社員',
+    description: '私たち『ホンダカーズ西釧路』で購入いただいた車の整備です。',
+    work_hours: 'ホンダカーズ西釧路店のシフトによる',
+  })
+  assert.equal(row.title, '自動車整備士')
+  assert.ok(row.description?.includes('北海道標津郡中標津町'))
+  assert.ok(!row.description?.includes('ホンダ'))
+  assert.equal(row.workHours, undefined)
 })
 
 test('登録名の方が長い場合も法人格の隣接語として伏せる', () => {
@@ -126,4 +173,19 @@ test('フォールバックは既定で無効（新しい呼び出し元が地�
   const t = 'ドライバー／日本海水（株）構内'
   assert.equal(redact(t, '有限会社 ネクサス・ライン'), t)
   assert.equal(redact(t, '有限会社 ネクサス・ライン', { corpFallback: true }), 'ドライバー／非公開構内')
+})
+
+test('社名を取得できない行も安全な概要だけにし、匿名化未確認として扱う', () => {
+  const row = mapRow({
+    source: 'hellowork',
+    source_id: '13010-12345678',
+    source_name: 'ハローワークインターネットサービス',
+    title: '自動車整備士（株式会社サンプル）',
+    description: '株式会社サンプルで自動車整備を担当します',
+  })
+  assert.equal(row.companyName, undefined)
+  assert.equal(row.companyRedactionVerified, false)
+  assert.ok(row.description?.includes('掲載企業名と企業を特定できる仕事内容は公開していません'))
+  assert.ok(!row.description?.includes('サンプル'))
+  assert.ok(!row.title?.includes('サンプル'))
 })

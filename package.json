@@ -9,6 +9,10 @@
     "start": "next start",
     "generate:catalog-feed": "tsx scripts/generate-catalog-feed.mts",
     "generate:catalog-image-candidates": "tsx scripts/queue-catalog-images.mts",
+    "restore:catalog-feed": "tsx scripts/restore-catalog-snapshot.mts",
+    "rebaseline:catalog-feed": "tsx scripts/rebaseline-catalog-publish-state.mts",
+    "ensure:meta-source-master": "tsx scripts/ensure-meta-source-master.mts",
+    "refresh:meta-catalog": "tsx scripts/refresh-meta-catalog.mts",
     "test:catalog-images": "tsx --test scripts/lib/catalog-images.test.mts",
     "test:catalog-feed": "tsx --test scripts/lib/*.test.mts",
     "test:unit": "vitest run"
@@ -22,7 +26,6 @@
     "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-tabs": "^1.1.13",
-    "@vercel/blob": "^2.5.0",
     "autoprefixer": "^10.4.20",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

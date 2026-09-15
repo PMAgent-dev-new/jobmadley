@@ -3,6 +3,8 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import SiteHeader from "@/shared/components/site-header"
 import SiteFooter from "@/shared/components/site-footer"
+import EntryCtaLink from "@/shared/components/entry-cta-link"
+import JobViewTracker from "@/app/job/components/job-view-tracker"
 import {
   getExternalJob,
   getExternalJobDetail,
@@ -11,13 +13,15 @@ import {
   externalApplyId,
 } from "@/features/external-jobs/api"
 import { getJobCategories } from "@/features/master/job-categories"
+import { isExternalJobExpired } from "@/features/external-jobs/expiry"
+import { isExternalMetaCatalogJob } from "@/features/external-jobs/catalog-eligibility"
 
 /**
  * 提携媒体から取り込んだ求人の詳細ページ。
  * - robots: noindex（薄い/重複コンテンツ回避。follow で内部リンクは辿らせる）
  * - JobPosting 構造化データは付けない（重複 JobPosting 回避）
  * - 求人票画像・企業画像・地図は出さない（テキストのみ）
- * - 表示方針（2026-07-21 三木さん決定）: 取得元の表記は出さず、CTAは他の求人と同じ応募導線
+ * - 出典と運営主体を明記し、掲載期限後は相談CTAを停止する
  */
 export const revalidate = 3600
 export const dynamicParams = true
@@ -57,7 +61,12 @@ export default async function Page({ params }: Props) {
   const job = await getExternalJob(source, decodeURIComponent(id))
   if (!job) notFound()
 
-  const detail = await getExternalJobDetail(job.source, job.sourceId)
+  const expired = isExternalJobExpired(job.expiresAt, job.lastSeen)
+  const isMechanic = ["自動車整備士", "バイク整備士"].includes(job.jobCategory || "")
+  // 整備士の原文詳細には、登録社名と異なる店舗ブランド・勤務先別名が入るため、
+  // 公開は構造化済みの概要に限定する。既存の他職種の詳細表示は変えない。
+  const detail = isMechanic ? null : await getExternalJobDetail(job.source, job.sourceId)
+  const catalogEligible = isExternalMetaCatalogJob(job)
   const hubSlug = hubSlugForExternalCategory(job.jobCategory)
   const applyHref = `/apply/${externalApplyId(job.source, job.sourceId)}`
   // パンくずのラベルはリンク先ハブの職種名を使う。外部側のカテゴリ名（例「配送・宅配ドライバー」）を
@@ -77,6 +86,13 @@ export default async function Page({ params }: Props) {
 
   return (
     <div className="min-h-screen bg-white">
+      {catalogEligible && (
+        <JobViewTracker
+          id={job.sourceId}
+          name={job.title}
+          catalogEligible
+        />
+      )}
       <SiteHeader />
       <main className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
         <nav aria-label="パンくずリスト" className="mb-4 text-sm text-gray-500">
@@ -105,6 +121,12 @@ export default async function Page({ params }: Props) {
         {/* 掲載企業は伏せる。空欄にすると情報の欠落に見えるため、伏せていることを明示する。 */}
         <p className="mt-1 text-gray-600">掲載企業：非公開</p>
 
+        <aside className="mt-5 rounded-lg border border-blue-100 bg-blue-50 p-4 text-sm leading-6 text-gray-700">
+          <p>出典：{job.sourceName || "ハローワークインターネットサービス"}の公開求人情報</p>
+          <p>運営：株式会社PM Agent（RIDE JOB）</p>
+          <p>RIDE JOBはハローワーク公式サイトではありません。内容は最新の求人票と異なる場合があります。</p>
+        </aside>
+
         {/* 概要。勤務地は本体レコード由来＝市区町村まで（詳細ページの住所は番地まで載っており、
             検索すると掲載企業が特定できてしまうため取り込んでいない）。 */}
         <dl className="mt-6">
@@ -112,10 +134,10 @@ export default async function Page({ params }: Props) {
           <Row label="給与" value={salary} />
           <Row label="雇用形態" value={job.employmentType} />
           <Row label="就業時間" value={job.workHours} />
+          <Row label="掲載期限" value={job.expiresAt} />
           {!detail && <Row label="仕事内容" value={job.description} />}
         </dl>
 
-        {/* 詳細項目。未取得の求人では出さず、上の概要だけになる（段階的にバックフィルするため）。 */}
         {detail &&
           EXTERNAL_DETAIL_GROUPS.map(({ group, items }) => {
             const rows = items.filter(([col]) => detail[col])
@@ -134,14 +156,26 @@ export default async function Page({ params }: Props) {
             )
           })}
 
-        {/* 応募導線は他の求人と同じ */}
         <div className="mt-8">
-          <Link
-            href={applyHref}
-            className="flex min-h-[52px] w-full items-center justify-center rounded-lg bg-primary px-6 py-3 font-bold text-primary-foreground transition-opacity hover:opacity-90"
-          >
-            応募画面へ進む
-          </Link>
+          {expired ? (
+            <div className="rounded-lg bg-gray-100 px-6 py-4 text-center font-bold text-gray-700">
+              この求人は掲載期間を終了しました
+            </div>
+          ) : (
+            <>
+              <EntryCtaLink
+                href={applyHref}
+                className="flex min-h-[52px] w-full items-center justify-center rounded-lg bg-primary px-6 py-3 font-bold text-primary-foreground transition-opacity hover:opacity-90"
+              >
+                {isMechanic ? "RIDE JOBに相談する" : "応募画面へ進む"}
+              </EntryCtaLink>
+              {isMechanic && (
+                <p className="mt-2 text-center text-xs text-gray-500">
+                  ハローワークへの直接応募ではなく、RIDE JOBへの転職相談です。
+                </p>
+              )}
+            </>
+          )}
         </div>
       </main>
       <SiteFooter />

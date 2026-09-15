@@ -23,9 +23,10 @@ import { sendApplicantSms, type SmsChannel } from "@/shared/sms/applicantSms"
 import { sendMetaCapiLead } from "@/shared/meta/capi"
 import { detectTestApplication, type TestDetection } from "@/shared/application/testDetection"
 import { isMetaCatalogJob } from "@/shared/lib/catalog-eligibility"
-import { getExternalCompanyName } from "@/features/external-jobs/api"
+import { getExternalJobForSubmission } from "@/features/external-jobs/api"
 import { parseExternalApplyId } from "@/features/external-jobs/apply-id"
-import { isExternalJobId } from "@/features/external-jobs/apply-id"
+import { isExternalJobExpired } from "@/features/external-jobs/expiry"
+import { isExternalMetaCatalogJob } from "@/features/external-jobs/catalog-eligibility"
 
 interface ApplicationPayload {
   lastName?: string
@@ -52,6 +53,7 @@ interface ApplicationPayload {
   gclid?: string
   applyEmail?: string
   metaEventId?: string
+  applicationIntent?: "apply" | "consult"
   [key: string]: unknown
 }
 
@@ -61,6 +63,7 @@ interface ClassifiedApplication {
   isPmAgent: boolean
   isStandby: boolean
   isKyujinbox: boolean
+  isConsult: boolean
 }
 
 /** 流入経路の「古い＝誤帰属の疑い」判定に使う日数しきい値。 */
@@ -90,6 +93,7 @@ const buildInternalLarkCard = (
   test?: TestDetection,
 ) => {
   const appliedAt = new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })
+  const actionLabel = c.isConsult ? "相談" : "応募"
 
   const details = [
     `1. 氏名: ${input.lastName ?? ""} ${input.firstName ?? ""}`,
@@ -104,6 +108,7 @@ const buildInternalLarkCard = (
     jobLines.push(
       `会社名: ${input.companyName ?? "—"}`,
       `求人名: ${input.jobName ?? "—"}`,
+      `求人ID: ${input.jobId ?? "—"}`,
       `求人URL: ${input.jobUrl ?? `https://ridejob.jp/job/${input.jobId ?? "—"}`}`,
     )
   }
@@ -140,7 +145,10 @@ const buildInternalLarkCard = (
 
   let titleEmoji = "🟦"
   let titleText = "ライドジョブ求人サイトから応募がありました！"
-  if (c.isMechanic && c.isStandby) {
+  if (c.isMechanic && c.isConsult) {
+    titleEmoji = "🔧"
+    titleText = "ライドジョブ求人サイトから整備士の転職相談がありました！"
+  } else if (c.isMechanic && c.isStandby) {
     titleEmoji = "🔧"
     titleText = "スタンバイから整備士の応募がありました！"
   } else if (c.isMechanic && c.isKyujinbox) {
@@ -167,9 +175,9 @@ const buildInternalLarkCard = (
     msg_type: "interactive",
     card: {
       elements: [
-        { tag: "div", text: { tag: "lark_md", content: `**${titleEmoji} ${titleText}**\n応募日時: ${appliedAt}` } },
+        { tag: "div", text: { tag: "lark_md", content: `**${titleEmoji} ${titleText}**\n${actionLabel}日時: ${appliedAt}` } },
         { tag: "hr" },
-        { tag: "div", text: { tag: "lark_md", content: `**📋 応募内容**\n${details}` } },
+        { tag: "div", text: { tag: "lark_md", content: `**📋 ${actionLabel}内容**\n${details}` } },
         ...(jobLines.length > 0
           ? [
               { tag: "hr" },
@@ -190,6 +198,8 @@ const buildInternalLarkCard = (
 const buildBitableFields = (input: ApplicationPayload, c: ClassifiedApplication): ApplicationFields => {
   // extraNotes は求人ボックス連携（applications ルート）が応募者詳細に使うため、内部フォームでは空のまま。
   const extraNotes: string[] = []
+  if (c.isConsult && input.jobId) extraNotes.push(`求人ID: ${input.jobId}`)
+  if (c.isConsult) extraNotes.push("受付区分: RIDE JOBへの転職相談（求人企業への直接応募ではない）")
   // attributionNotes: 内部フォームの補助情報。liftjob のみメモに残し、ridejob/mechanic は載せない。
   const attributionNotes: string[] = []
   if (c.isStandby) attributionNotes.push("流入チャネル: スタンバイ")
@@ -263,8 +273,6 @@ const logRequestContext = (request: Request, timestamp: string): void => {
   console.log(`[INFO] Request Headers:`)
   console.log(`  - User-Agent: ${request.headers.get("user-agent") || "unknown"}`)
   console.log(`  - Content-Length: ${request.headers.get("content-length") || "unknown"}`)
-  console.log(`  - X-Forwarded-For: ${request.headers.get("x-forwarded-for") || "unknown"}`)
-  console.log(`  - Referer: ${request.headers.get("referer") || "unknown"}`)
   console.log(sep)
 }
 
@@ -286,17 +294,88 @@ export async function POST(request: Request) {
     // クライアントの申告ではなくサーバー側で解決するので、詐称もできない。
     // 分類（detectCpOne / detectPmAgent）より前に入れて、従来と同じ値で判定させる。
     const ext = incoming.jobId ? parseExternalApplyId(incoming.jobId) : null
-    if (ext && !incoming.companyName) {
-      incoming.companyName = await getExternalCompanyName(ext.source, ext.sourceId)
+    let isExternalMechanic = false
+    let isExternalCatalogItem = false
+    if (ext) {
+      // applicationIntent はクライアント入力なので、外部求人では分岐条件に使わない。
+      // 一次データをno-storeで必ず引き直し、存在・期限・職種をサーバー側で確定する。
+      // これにより、整備士求人を apply と偽装して相談ルーティングを迂回できない。
+      const verified = await getExternalJobForSubmission(ext.source, ext.sourceId)
+      if (!verified.ok) {
+        return NextResponse.json(
+          { success: false, message: "External job source is temporarily unavailable" },
+          { status: 503 },
+        )
+      }
+      if (
+        !verified.job
+        || isExternalJobExpired(verified.job.expiresAt, verified.job.lastSeen)
+      ) {
+        return NextResponse.json(
+          { success: false, message: "This job is no longer available" },
+          { status: 410 },
+        )
+      }
+      incoming.companyName = verified.companyName
+      incoming.jobName = verified.job.title
+      incoming.jobCategoryName = verified.job.jobCategory
+      isExternalMechanic = ["自動車整備士", "バイク整備士"].includes(
+        verified.job.jobCategory || "",
+      )
+      isExternalCatalogItem = isExternalMetaCatalogJob(verified.job)
+      if (!isExternalMechanic && incoming.applicationIntent === "consult") {
+        return NextResponse.json(
+          { success: false, message: "This job is not eligible for mechanic consultation" },
+          { status: 400 },
+        )
+      }
+      if (isExternalMechanic) {
+        incoming.applyEmail = "ridejob.mechanic@pmagent.jp"
+        incoming.applicationIntent = "consult"
+      } else {
+        // 既存の非整備士外部求人は従来どおり応募として扱う。
+        incoming.applicationIntent = "apply"
+      }
+    }
+    // カタログ・Pixel/CAPI・Lark の求人IDを、詳細URLに出る raw source_id へ統一する。
+    // /apply の hw- 接頭辞はルーティング内部だけで使い、外部へ保存しない。
+    if (ext && isExternalMechanic) {
+      incoming.jobId = ext.sourceId
+      incoming.applicationIntent = "consult"
+      const canonicalJobUrl = new URL(
+        `/external-job/${encodeURIComponent(ext.source)}/${encodeURIComponent(ext.sourceId)}`,
+        "https://ridejob.jp",
+      )
+      try {
+        const submittedUrl = new URL(incoming.jobUrl || "", "https://ridejob.jp")
+        for (const key of [
+          "source", "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+          "fbclid", "gclid",
+        ]) {
+          const value = submittedUrl.searchParams.get(key)
+          if (value) canonicalJobUrl.searchParams.set(key, value)
+        }
+      } catch {
+        // 不正URLでも canonicalJobUrl を使い、クライアント値は保存しない。
+      }
+      incoming.jobUrl = canonicalJobUrl.toString()
     }
 
-    console.log("[INFO] Raw Request Data (Pretty Formatted):")
-    console.log(JSON.stringify(incoming, null, 2))
+    console.log("[INFO] Application request accepted", {
+      jobId: incoming.jobId || "(none)",
+      intent: incoming.applicationIntent || "apply",
+      source: incoming.applicationSource || "unknown",
+      hasEmail: Boolean(incoming.email),
+      hasPhone: Boolean(incoming.phone),
+    })
 
     // 求人種別の分類
     const isMechanic = detectMechanic(incoming.applyEmail)
-    const isCpOne = detectCpOne(incoming.companyName)
-    const isPmAgent = detectPmAgent(incoming.companyName)
+      || isExternalMechanic
+    // 外部整備士は掲載企業名より「RIDE JOBへの転職相談」という受付種別を優先する。
+    // 偶然CP One/PM Agentの名称を含む企業でも、別サービスへ誤配送しない。
+    const isCpOne = !isExternalMechanic && detectCpOne(incoming.companyName)
+    const isPmAgent = !isExternalMechanic && detectPmAgent(incoming.companyName)
     const source = normalizeSource(incoming.applicationSource, incoming.jobUrl)
     const classification: ClassifiedApplication = {
       isMechanic,
@@ -304,6 +383,8 @@ export async function POST(request: Request) {
       isPmAgent,
       isStandby: source === "standby",
       isKyujinbox: source === "kyujinbox",
+      // 転職相談扱いはサーバーが一次データで整備士と確認した外部求人だけに限定する。
+      isConsult: isExternalMechanic,
     }
 
     // テスト応募判定（実績を汚染しないよう Base登録・自動連絡・CAPI をスキップする）
@@ -332,20 +413,23 @@ export async function POST(request: Request) {
 
     // 並列送信
     type TaskResult = {
-      name: "notification" | "base_registration" | "applicant_mail" | "applicant_sms" | "meta_capi"
+      name: "base_registration" | "applicant_mail" | "applicant_sms" | "meta_capi"
       ok: boolean
       base?: BitableCreateResult
     }
     const tasks: Promise<TaskResult>[] = []
 
-    tasks.push(
-      notifyLark({
-        api: { service: notification.service, chatId: notification.chatId },
-        webhookUrl: notification.url,
-        payload: buildInternalLarkCard(incoming, classification, test),
-        context: "submit-application:notification",
-      }).then((r) => ({ name: "notification", ok: r.ok })),
-    )
+    // 受付の正本となる社内通知を先に確定する。ここで失敗した場合は、メール・SMS・CAPIを
+    // 送らずにエラーを返し、「未受付なのに応募者へ完了通知／Lead計測」になるのを防ぐ。
+    const notificationResult = await notifyLark({
+      api: { service: notification.service, chatId: notification.chatId },
+      webhookUrl: notification.url,
+      payload: buildInternalLarkCard(incoming, classification, test),
+      context: "submit-application:notification",
+    })
+    if (!notificationResult.ok) {
+      return NextResponse.json({ success: false, message: "Failed to send notification to Lark" }, { status: 502 })
+    }
     if (!test.isTest) {
       tasks.push(
         (async (): Promise<TaskResult> => {
@@ -397,6 +481,7 @@ export async function POST(request: Request) {
         name: `${incoming.lastName ?? ""} ${incoming.firstName ?? ""}`.trim(),
         companyName: incoming.companyName,
         jobName: incoming.jobName,
+        intent: classification.isConsult ? "consult" : "apply",
       })
       tasks.push(
         sendMail(mail, "submit-application:applicant").then((r) => ({ name: "applicant_mail", ok: r.ok })),
@@ -415,6 +500,7 @@ export async function POST(request: Request) {
             channel: smsChannel,
             applicantName: `${incoming.lastName ?? ""} ${incoming.firstName ?? ""}`.trim(),
             media: incoming.utmSource || incoming.applicationSource || "meta",
+            intent: classification.isConsult ? "consult" : "apply",
           },
           "submit-application:applicant",
         ).then((r) => ({ name: "applicant_sms" as const, ok: r.ok })),
@@ -435,8 +521,7 @@ export async function POST(request: Request) {
           fbc: readCookie(cookieHeader, "_fbc"),
           clientIpAddress: clientIp,
           clientUserAgent: request.headers.get("user-agent") ?? undefined,
-          // 外部求人IDはMetaカタログに存在しないため content_ids に載せない
-          contentIds: incoming.jobId && !isExternalJobId(incoming.jobId) && isMetaCatalogJob({
+          contentIds: incoming.jobId && (!ext || isExternalCatalogItem) && isMetaCatalogJob({
             jobName: incoming.jobName,
             jobCategory: { name: incoming.jobCategoryName },
           }) ? [incoming.jobId] : undefined,
@@ -448,11 +533,7 @@ export async function POST(request: Request) {
 
     const results = await Promise.all(tasks)
 
-    // 通知失敗は致命的、Base登録失敗は非致命
-    const notifyResult = results.find((r) => r.name === "notification")
-    if (notifyResult && !notifyResult.ok) {
-      return NextResponse.json({ success: false, message: "Failed to send notification to Lark" }, { status: 502 })
-    }
+    // Base登録失敗は非致命（Lark通知は上で成功済み）。
     const baseResult = results.find((r) => r.name === "base_registration")
     if (baseResult && !baseResult.ok) {
       const b = baseResult.base

@@ -6,6 +6,7 @@ import {
   CATALOG_DESCRIPTION_MAX_LENGTH,
   CATALOG_TITLE_MAX_LENGTH,
   PM_AGENT_DISCLOSURE,
+  HELLOWORK_DISCLOSURE,
   catalogRoleKey,
   validateCatalogCopy,
 } from './catalog-copy.mts'
@@ -103,4 +104,52 @@ test('buildCatalogDescription never includes unsupported universal guarantees', 
   assert.equal(description.includes('習得を保証'), false)
   assert.equal(description.includes('国籍や経験'), false)
   assert.deepEqual(validateCatalogCopy('タクシードライバー（北区）', description), [])
+})
+
+test('buildCatalogDescription supports the external job source disclosure', () => {
+  const description = buildCatalogDescription({
+    category: 'mechanic',
+    sourceTitle: '自動車整備士',
+    salary: '月給25万円〜35万円',
+    employmentType: '正社員',
+    region: '大阪府',
+    locality: '大阪市',
+    descriptionWork: '自動車の点検、整備、修理を行います。',
+    disclosure: HELLOWORK_DISCLOSURE,
+  })
+  assert.equal(description.includes(PM_AGENT_DISCLOSURE), false)
+  assert.equal(description.includes(HELLOWORK_DISCLOSURE), true)
+  assert.deepEqual(
+    validateCatalogCopy('自動車整備士（大阪市）', description, { requiredDisclosure: HELLOWORK_DISCLOSURE }),
+    [],
+  )
+})
+
+test('buildCatalogDescription removes Hello Work direct-application guidance but keeps the disclosure', () => {
+  const description = buildCatalogDescription({
+    category: 'mechanic',
+    sourceTitle: '自動車整備士',
+    salary: '月給25万円',
+    employmentType: '正社員',
+    region: '東京都',
+    locality: '千代田区',
+    descriptionWork: '自動車の点検整備を担当します。詳細はハローワーク窓口から応募してください。',
+    disclosure: HELLOWORK_DISCLOSURE,
+  })
+  assert.ok(description.includes('自動車の点検整備を担当します'))
+  assert.equal(description.includes('窓口から応募'), false)
+  assert.ok(description.includes(HELLOWORK_DISCLOSURE))
+  assert.deepEqual(validateCatalogCopy('自動車整備士（千代田区）', description, {
+    requiredDisclosure: HELLOWORK_DISCLOSURE,
+  }), [])
+})
+
+test('validateCatalogCopy rejects residual age or gender recruiting conditions', () => {
+  const base = `月給25万円｜正社員｜東京都千代田区\n\n勤務先｜勤務先企業\n\n仕事内容｜自動車整備\n\n${HELLOWORK_DISCLOSURE}`
+  assert.ok(validateCatalogCopy('自動車整備士（千代田区）', `${base}\n59歳以下を募集します`, {
+    requiredDisclosure: HELLOWORK_DISCLOSURE,
+  }).includes('discriminatory_job_condition'))
+  assert.ok(validateCatalogCopy('自動車整備士（千代田区）', `${base}\n女性限定募集`, {
+    requiredDisclosure: HELLOWORK_DISCLOSURE,
+  }).includes('discriminatory_job_condition'))
 })

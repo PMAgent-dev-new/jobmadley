@@ -5,6 +5,9 @@ import ApplicationForm from "@/features/application/components/application-form"
 import { getJob } from "@/features/jobs/api"
 import type { JobDetail } from "@/features/jobs/types"
 import { getExternalJob, parseExternalApplyId } from "@/features/external-jobs/api"
+import { isExternalJobExpired } from "@/features/external-jobs/expiry"
+import { isExternalMetaCatalogJob } from "@/features/external-jobs/catalog-eligibility"
+import { MECHANIC_APPLY_EMAIL } from "@/shared/lark/routing"
 import { AppError, ErrorType, withErrorHandling } from "@/shared/lib/error-handling"
 
 interface ApplicationPageProps {
@@ -26,11 +29,16 @@ export default async function ApplicationPage({ params }: ApplicationPageProps) 
   const external = parseExternalApplyId(id)
   if (external) {
     const e = await getExternalJob(external.source, external.sourceId)
-    if (!e) notFound()
+    if (!e || isExternalJobExpired(e.expiresAt, e.lastSeen)) notFound()
+    const isMechanic = ["自動車整備士", "バイク整備士"].includes(e.jobCategory || "")
     const externalJob: JobDetail = {
       id,
       title: e.title ?? "求人",
       jobName: e.title,
+      jobCategory: {
+        id: isMechanic ? "external-mechanic" : "external-job",
+        name: e.jobCategory || "求人",
+      },
       // 社名はクライアントへ渡さない。ApplicationForm は "use client" なので、
       // 画面に出さなくても props はRSCペイロードに載り、ページのソースから読めてしまう。
       // 社内通知に必要な実名は submit-application が jobId から サーバー側で引き直す。
@@ -42,10 +50,16 @@ export default async function ApplicationPage({ params }: ApplicationPageProps) 
       descriptionWork: e.description,
       addressPrefMuni: e.prefecture,
       addressLine: e.address,
+      applyEmail: isMechanic ? MECHANIC_APPLY_EMAIL : undefined,
     }
     return (
       <Suspense fallback={<div>読み込み中...</div>}>
-        <ApplicationForm job={externalJob} />
+        <ApplicationForm
+          job={externalJob}
+          catalogItemId={isMechanic && isExternalMetaCatalogJob(e) ? external.sourceId : null}
+          mode={isMechanic ? "consult" : "apply"}
+          jobDetailPath={`/external-job/${external.source}/${external.sourceId}`}
+        />
       </Suspense>
     )
   }
