@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
-import { importAndVerifyMetaCatalog } from './meta-catalog-import.mts'
+import { importAndVerifyMetaCatalog, importPublishedMetaCatalog } from './meta-catalog-import.mts'
 
 test('triggers an import and verifies detected, persisted, invalid, and catalog counts', async () => {
   const requests: Array<{ url: string; method: string }> = []
@@ -67,4 +68,36 @@ test('fails when Meta detects a different product count', async () => {
     }),
     /取込件数が一致しません/,
   )
+})
+
+test('rejects a published feed that does not match its completion marker before calling Meta', async () => {
+  const primary = Buffer.from('id\ttitle\njob-1\tMechanic\n')
+  let metaCalled = false
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () => {
+    metaCalled = true
+    return Response.json({ id: '1800000000000003' })
+  }) as typeof fetch
+  try {
+    await assert.rejects(
+      importPublishedMetaCatalog({
+        storage: {
+          read: async () => Buffer.from(JSON.stringify({
+            products: 1,
+            primary_sha256: createHash('sha256').update(primary).digest('hex'),
+            primary_bytes: primary.byteLength,
+          })),
+          readPublic: async () => Buffer.from('different feed'),
+          publicUrl: () => 'https://example.com/feed.tsv',
+        },
+        accessToken: 'test-token',
+        feedId: 'feed-3',
+        catalogId: 'catalog-3',
+      }),
+      /公開完了マーカーと一次フィードが一致しません/,
+    )
+    assert.equal(metaCalled, false)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })

@@ -13,6 +13,7 @@ name: catalog-feed
 #   - CATALOG_FEED_TOKEN          (上記APIの読み取りトークン)
 #   - CATALOG_GENERATE_API_URL    (ridejob-analytics の /api/ai/catalog-generate)
 #   - CATALOG_GENERATE_TOKEN      (上記APIのBearer token)
+#   - META_ACCESS_TOKEN_WRITE     (既存Metaカタログの即時取込・検証)
 
 on:
   schedule:
@@ -20,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: 通常公開・補助処理・直前スナップショット復元
+        description: 通常公開・補助処理・Meta即時取込・直前スナップショット復元
         required: true
         default: publish
         type: choice
@@ -29,6 +30,7 @@ on:
           - ensure_meta_source_master
           - rebaseline_existing_feed
           - restore_latest_snapshot
+          - refresh_meta_catalog
       generate_image_candidates:
         description: 費用承認済みの場合だけ求人別のAI画像候補を生成する
         required: false
@@ -125,6 +127,18 @@ jobs:
 
       - name: Refresh and verify Meta catalog after restore
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'restore_latest_snapshot' }}
+        run: npm run refresh:meta-catalog
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          CATALOG_STORAGE_BUCKET: meta-catalog
+          META_ACCESS_TOKEN_WRITE: ${{ secrets.META_ACCESS_TOKEN_WRITE }}
+          CATALOG_META_FEED_ID: '1723120795666904'
+          CATALOG_META_CATALOG_ID: '2747970972248998'
+          CATALOG_META_MAX_INVALID_ITEMS: '9'
+
+      - name: Refresh and verify current Meta catalog
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'refresh_meta_catalog' }}
         run: npm run refresh:meta-catalog
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
