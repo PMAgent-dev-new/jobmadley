@@ -12,12 +12,20 @@ export type ApplyContext = {
   utmMediumFirst: string
   /** 最終接触キャンペーン */
   utmCampaign: string
+  /** 最終接触content。既存の求人ID互換値または広告名。 */
+  utmContent: string
   /** 最終接触の取得時刻（ISO, 空文字なら不明） */
   utmLastTouchAt: string
   /** 初回接触の取得時刻（ISO, 空文字なら不明） */
   utmFirstTouchAt: string
   fbclid: string
   gclid: string
+  catalogJobId: string
+  catalogClickedAt: string
+  catalogLandingPath: string
+  catalogSource: string
+  catalogMedium: string
+  catalogEvidence: "utm" | "fbclid" | ""
 }
 
 const EMPTY_APPLY_CONTEXT: ApplyContext = {
@@ -28,10 +36,17 @@ const EMPTY_APPLY_CONTEXT: ApplyContext = {
   utmSourceFirst: "",
   utmMediumFirst: "",
   utmCampaign: "",
+  utmContent: "",
   utmLastTouchAt: "",
   utmFirstTouchAt: "",
   fbclid: "",
   gclid: "",
+  catalogJobId: "",
+  catalogClickedAt: "",
+  catalogLandingPath: "",
+  catalogSource: "",
+  catalogMedium: "",
+  catalogEvidence: "",
 }
 
 export function buildBirthDate(year: string, month: string, day: string): string {
@@ -111,6 +126,7 @@ export function resolveApplyContext(jobUrlOverride?: string): ApplyContext {
   const attr = readAttribution()
   const last = attr.lastTouch
   const first = attr.firstTouch
+  const catalog = attr.catalogTouch
   const currentUtmMedium = searchParams.get("utm_medium")?.trim() || ""
   const currentUtmCampaign = searchParams.get("utm_campaign")?.trim() || ""
   const currentFbclid = searchParams.get("fbclid")?.trim() || ""
@@ -125,10 +141,17 @@ export function resolveApplyContext(jobUrlOverride?: string): ApplyContext {
     utmSourceFirst: first?.source ?? "",
     utmMediumFirst: first?.medium ?? "",
     utmCampaign: currentUtmCampaign || last?.campaign || "",
+    utmContent: searchParams.get("utm_content")?.trim() || last?.content || "",
     utmLastTouchAt: last?.at ?? "",
     utmFirstTouchAt: first?.at ?? "",
     fbclid: currentFbclid || attr.fbclid || "",
     gclid: currentGclid || attr.gclid || "",
+    catalogJobId: catalog?.jobId ?? "",
+    catalogClickedAt: catalog?.at ?? "",
+    catalogLandingPath: catalog?.landing ?? "",
+    catalogSource: catalog?.source ?? "",
+    catalogMedium: catalog?.medium ?? "",
+    catalogEvidence: catalog?.evidence ?? "",
   }
 
   if (context.utmSource || context.utmMedium) {
@@ -146,6 +169,7 @@ export async function postApplication(payload: ApplicationFormData & {
   applyEmail: string
   applicationSource: string
   metaEventId?: string
+  submissionId: string
 }): Promise<void> {
   const response = await fetch("/api/submit-application", {
     method: "POST",

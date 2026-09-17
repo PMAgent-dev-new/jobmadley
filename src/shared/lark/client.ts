@@ -16,6 +16,8 @@ interface LarkResponseBody {
   StatusMessage?: string
 }
 
+const LARK_FETCH_TIMEOUT_MS = 5000
+
 /**
  * Lark Webhookに POST する。
  *
@@ -31,6 +33,7 @@ export const sendToLark = async (
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(LARK_FETCH_TIMEOUT_MS),
     })
     const body = await response.text()
 

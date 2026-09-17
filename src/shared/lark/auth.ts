@@ -10,6 +10,7 @@ interface CachedToken {
 
 const cache = new Map<LarkServiceId, CachedToken>()
 const REFRESH_THRESHOLD_MS = 5 * 60 * 1000
+const LARK_FETCH_TIMEOUT_MS = 5000
 
 const fetchTenantAccessToken = async (service: LarkServiceId): Promise<CachedToken> => {
   const { appId, appSecret, domain } = larkServiceCredentials(service)
@@ -18,6 +19,7 @@ const fetchTenantAccessToken = async (service: LarkServiceId): Promise<CachedTok
     method: "POST",
     headers: { "Content-Type": "application/json; charset=utf-8" },
     body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
+    signal: AbortSignal.timeout(LARK_FETCH_TIMEOUT_MS),
   })
   const data = (await res.json()) as { code?: number; msg?: string; tenant_access_token?: string; expire?: number }
   if (!res.ok || data.code !== 0 || !data.tenant_access_token) {

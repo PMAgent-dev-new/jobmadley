@@ -29,6 +29,19 @@ export type AttributionTouch = {
   at: string
 }
 
+export type CatalogAttributionTouch = {
+  /** Metaカタログの商品ID（RIDE JOBの求人ID）。 */
+  jobId: string
+  /** カタログ商品URLへ着地した時刻（ISO 8601, UTC）。 */
+  at: string
+  /** 商品URLのランディングパス。 */
+  landing: string
+  /** 同じ着地URLに含まれていたMeta流入情報。後続UTMで上書きしない。 */
+  source?: string
+  medium?: string
+  evidence: "utm" | "fbclid"
+}
+
 export type Attribution = {
   firstTouch?: AttributionTouch
   lastTouch?: AttributionTouch
@@ -45,6 +58,8 @@ export type Attribution = {
   landing?: string
   /** 初回接触時の document.referrer */
   referrer?: string
+  /** Metaカタログで直近に見た求人。サイト内回遊後も独立して保持する。 */
+  catalogTouch?: CatalogAttributionTouch
 }
 
 const COOKIE_NAME = "rj_attr"
@@ -83,6 +98,38 @@ const writeCookie = (name: string, value: string, maxAgeSec: number): void => {
 
 const isMeaningful = (t: Partial<AttributionTouch>): boolean =>
   Boolean(t.source || t.medium || t.campaign || t.content || t.term)
+
+const META_SOURCES = new Set(["meta", "facebook", "fb", "instagram", "ig", "msg", "an", "th"])
+const META_PAID_MEDIUMS = new Set(["catalog", "ad", "cpc", "paid_social", "paid-social"])
+
+/**
+ * 同一着地URLにカタログ専用IDとMeta広告の証拠がそろう場合だけ、独立した接触として採用する。
+ * `catalog_job_id` 単独は共有URL・手入力でも作れるため採用しない。
+ */
+export function catalogTouchFromSearch(
+  search: string,
+  path: string,
+  nowIso: string,
+): CatalogAttributionTouch | undefined {
+  const params = new URLSearchParams(search)
+  const jobId = params.get("catalog_job_id")?.trim()
+  if (!jobId || jobId.length > 128) return undefined
+  const source = params.get("utm_source")?.trim().toLowerCase() || undefined
+  const medium = params.get("utm_medium")?.trim().toLowerCase() || undefined
+  const forwardedAt = params.get("catalog_clicked_at")?.trim()
+  const capturedAt = forwardedAt && Number.isFinite(Date.parse(forwardedAt)) ? forwardedAt : nowIso
+  const hasMetaUtm = Boolean(source && medium && META_SOURCES.has(source) && META_PAID_MEDIUMS.has(medium))
+  const hasFbclid = Boolean(params.get("fbclid")?.trim())
+  if (!hasMetaUtm && !hasFbclid) return undefined
+  return {
+    jobId,
+    at: capturedAt,
+    landing: path,
+    source,
+    medium,
+    evidence: hasMetaUtm ? "utm" : "fbclid",
+  }
+}
 
 /** 参照元ホスト名 → 検索エンジンの source 名。該当なしは undefined。 */
 const SEARCH_ENGINE_HOSTS: ReadonlyArray<[RegExp, string]> = [
@@ -204,6 +251,7 @@ export function captureAttribution(
   const fbclid = params.get("fbclid")?.trim() || undefined
   const gclid = params.get("gclid")?.trim() || undefined
   const oppref = params.get("oppref")?.trim() || undefined
+  const catalogTouch = catalogTouchFromSearch(search, path, nowIso)
 
   const current = readAttribution()
 
@@ -215,7 +263,7 @@ export function captureAttribution(
   // organic/referral として救い、有料の帰属には一切影響を与えない。
   // oppref を含めないと、UTMが欠けたChatGPT広告のクリックが referrer 推定に落ち、
   // chatgpt.com からの自然流入として記録される（＝広告費がAIO成果に混入する）。
-  if (!isMeaningful(touchParams) && !fbclid && !gclid && !oppref) {
+  if (!isMeaningful(touchParams) && !fbclid && !gclid && !oppref && !catalogTouch) {
     if (current.lastTouch || current.firstTouch) return current
 
     const host =
@@ -241,6 +289,7 @@ export function captureAttribution(
   const touch: AttributionTouch = { ...touchParams, at: nowIso }
 
   const next: Attribution = {
+    ...current,
     firstTouch: current.firstTouch ?? (isMeaningful(touchParams) ? touch : current.firstTouch),
     lastTouch: isMeaningful(touchParams) ? touch : current.lastTouch,
     fbclid: fbclid ?? current.fbclid,
@@ -248,6 +297,9 @@ export function captureAttribution(
     oppref: oppref ?? current.oppref,
     landing: current.landing ?? path,
     referrer: current.referrer ?? (referrer || undefined),
+    ...((catalogTouch ?? current.catalogTouch)
+      ? { catalogTouch: catalogTouch ?? current.catalogTouch }
+      : {}),
   }
 
   writeCookie(COOKIE_NAME, JSON.stringify(next), MAX_AGE_SEC)

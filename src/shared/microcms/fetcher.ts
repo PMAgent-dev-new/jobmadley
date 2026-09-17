@@ -26,10 +26,11 @@ const REVALIDATE_SECONDS = 3600
  */
 const MASTER_REVALIDATE_SECONDS = 300
 
-const buildRequestInit = (queries?: MicroCMSQueries, revalidate?: number): RequestInit => {
+const buildRequestInit = (queries?: MicroCMSQueries, revalidate?: number, timeoutMs?: number): RequestInit => {
   const hasDraftKey = Boolean(queries && (queries as Record<string, unknown>).draftKey)
-  if (hasDraftKey) return { cache: "no-store" }
-  return { next: { revalidate: revalidate ?? REVALIDATE_SECONDS } } as RequestInit
+  const signal = timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined
+  if (hasDraftKey) return { cache: "no-store", signal }
+  return { next: { revalidate: revalidate ?? REVALIDATE_SECONDS }, signal } as RequestInit
 }
 
 export { MASTER_REVALIDATE_SECONDS }
@@ -68,6 +69,8 @@ export interface FetchDetailParams<TQueries extends MicroCMSQueries = MicroCMSQu
   queries?: TQueries
   context: string
   client?: ClientKey
+  /** APIルートなど、待ち時間を制限したい呼び出しだけ指定する。 */
+  timeoutMs?: number
 }
 
 export const fetchDetail = async <T>({
@@ -76,13 +79,14 @@ export const fetchDetail = async <T>({
   queries,
   context,
   client = "primary",
+  timeoutMs,
 }: FetchDetailParams): Promise<T> => {
   try {
     return await clientFor(client).get<T>({
       endpoint,
       contentId,
       queries,
-      customRequestInit: buildRequestInit(queries),
+      customRequestInit: buildRequestInit(queries, undefined, timeoutMs),
     })
   } catch (error) {
     logFailure(context, { endpoint, contentId, queries }, error)

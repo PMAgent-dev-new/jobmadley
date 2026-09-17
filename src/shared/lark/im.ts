@@ -5,6 +5,7 @@
 
 import { larkServiceCredentials, type LarkServiceId } from "@/shared/config/env"
 import { getTenantAccessToken, invalidateTenantAccessToken } from "@/shared/lark/auth"
+import { createHash } from "node:crypto"
 
 export interface LarkMessageResult {
   ok: boolean
@@ -21,7 +22,15 @@ interface SendMessageParams {
   /** カード本体（elements/header/config を持つ内側オブジェクト。msg_type ラッパは含めない） */
   card: Record<string, unknown>
   context: string
+  /** Lark APIが1時間以内の同一通知を重複排除するキー（最大50文字）。 */
+  idempotencyKey?: string
 }
+
+const LARK_FETCH_TIMEOUT_MS = 5000
+
+/** 最大50文字の制約内で、長い応募IDも先頭一致による衝突を起こさないuuidへ変換する。 */
+const larkMessageUuid = (value: string): string =>
+  createHash("sha256").update(value.trim(), "utf8").digest("hex").slice(0, 50)
 
 /**
  * インタラクティブカードを chat_id 宛に送信する。
@@ -32,6 +41,7 @@ export const sendLarkMessage = async ({
   chatId,
   card,
   context,
+  idempotencyKey,
 }: SendMessageParams): Promise<LarkMessageResult> => {
   const { domain } = larkServiceCredentials(service)
   const endpoint = `https://${domain}/open-apis/im/v1/messages?receive_id_type=chat_id`
@@ -39,6 +49,7 @@ export const sendLarkMessage = async ({
     receive_id: chatId,
     msg_type: "interactive",
     content: JSON.stringify(card),
+    ...(idempotencyKey?.trim() ? { uuid: larkMessageUuid(idempotencyKey) } : {}),
   }
 
   const callOnce = async (token: string): Promise<{ res: Response; data: any }> => {
@@ -49,6 +60,7 @@ export const sendLarkMessage = async ({
         "Content-Type": "application/json; charset=utf-8",
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(LARK_FETCH_TIMEOUT_MS),
     })
     const data = (await res.json().catch(() => ({}))) as any
     return { res, data }

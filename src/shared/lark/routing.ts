@@ -1,6 +1,6 @@
 // 求人種別／応募経路に応じた Lark 連携先の選択ロジックを集約。
 // submit-application（内部フォーム）と applications（求人ボックス連携）で共通利用される。
-// 通知は Webhook、Base 登録は bitable API に振り分ける。
+// 応募通知はchat_id APIを優先し、Base登録はbitable APIへ振り分ける。
 
 import { larkEnv, type LarkServiceId } from "@/shared/config/env"
 import { SERVICE_TABLES } from "@/shared/lark/bitable-schema"
@@ -175,10 +175,20 @@ export interface NotificationTarget {
  */
 export const resolveSubmitNotificationTarget = (classification: JobClassification): NotificationTarget => {
   const { isCpOne, isMechanic } = classification
-  const service = resolveBaseService(classification)
-  if (isCpOne) return { service, chatId: larkEnv.chatIdCpOne(), url: larkEnv.notificationCpOne(), type: "CPONE" }
-  if (isMechanic) return { service, chatId: larkEnv.chatIdMechanic(), url: larkEnv.notificationMechanic(), type: "MECHANIC" }
-  return { service, chatId: larkEnv.chatId(), url: larkEnv.notification(), type: "DEFAULT" }
+  if (isCpOne) {
+    return { service: "liftjob", chatId: larkEnv.chatIdCpOne(), url: larkEnv.notificationCpOne(), type: "CPONE" }
+  }
+  if (isMechanic) {
+    const chatId = larkEnv.submitChatIdMechanic()
+    return {
+      service: chatId ? "ridejob" : "mechanic",
+      chatId,
+      url: larkEnv.notificationMechanic(),
+      type: "MECHANIC",
+    }
+  }
+  const chatId = larkEnv.submitChatIdRidejob()
+  return { service: "ridejob", chatId, url: larkEnv.notification(), type: "DEFAULT" }
 }
 
 /**

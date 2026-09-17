@@ -15,6 +15,7 @@ const payload = {
   jobId: "hw-13010-12345678",
   applyEmail: "ridejob.mechanic@pmagent.jp",
   applicationSource: "meta",
+  submissionId: "submission-test-1",
 }
 
 afterEach(() => vi.unstubAllGlobals())

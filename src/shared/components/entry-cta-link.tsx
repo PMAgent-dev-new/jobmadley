@@ -35,6 +35,7 @@ const UTM_KEYS = [
 
 /** クリック ID。form_applicant は現状読まないが、Pixel 側の再構成に使われるため落とさない。 */
 const CLICK_IDS = ["gclid", "fbclid"]
+const CATALOG_KEYS = ["catalog_job_id", "catalog_clicked_at"]
 
 function buildEntryHref(baseHref: string): string {
   const current = new URLSearchParams(window.location.search)
@@ -49,10 +50,22 @@ function buildEntryHref(baseHref: string): string {
     const v = current.get(k)
     if (v) out.set(k, v)
   }
+  for (const k of CATALOG_KEYS) {
+    const v = current.get(k)
+    if (v) out.set(k, v)
+  }
+
+  // カタログ接触は一般UTMのlast touchとは独立して維持する。
+  const attr = readAttribution()
+  if (!out.has("catalog_job_id") && attr.catalogTouch?.jobId) {
+    out.set("catalog_job_id", attr.catalogTouch.jobId)
+  }
+  if (!out.has("catalog_clicked_at") && attr.catalogTouch?.at) {
+    out.set("catalog_clicked_at", attr.catalogTouch.at)
+  }
 
   // URLに utm が無ければ Cookie の lastTouch から補う（サイト内を回遊してから応募する経路）
   if (!out.has("utm_source")) {
-    const attr = readAttribution()
     const touch = attr.lastTouch ?? attr.firstTouch
     if (touch?.source) {
       out.set("utm_source", touch.source)

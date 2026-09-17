@@ -17,10 +17,18 @@ export interface ApplicationFormData {
   utmSourceFirst?: string
   utmMediumFirst?: string
   utmCampaign?: string
+  utmContent?: string
   utmLastTouchAt?: string
   utmFirstTouchAt?: string
   fbclid?: string
   gclid?: string
+  catalogJobId?: string
+  catalogClickedAt?: string
+  catalogLandingPath?: string
+  catalogSource?: string
+  catalogMedium?: string
+  catalogEvidence?: "utm" | "fbclid"
+  submissionId?: string
   /** 外部転載求人は求人企業への直接応募ではなく、RIDE JOBへの転職相談。 */
   applicationIntent?: "apply" | "consult"
 }

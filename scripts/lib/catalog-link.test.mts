@@ -3,16 +3,16 @@ import test from 'node:test'
 import { buildCatalogLink, isCatalogLinkRoutedCorrectly } from './catalog-link.mts'
 
 const LEGACY = (id: string) =>
-  `https://ridejob.jp/job/${id}?utm_content=${id}&utm_source=meta&utm_medium=catalog`
+  `https://ridejob.jp/job/${id}?utm_content=${id}&utm_source=meta&utm_medium=catalog&catalog_job_id=${id}`
 
 test('sends mechanic jobs to the /entry/mechanic form with job_id and no utm of its own', () => {
   const link = buildCatalogLink('56e8k1g95', 'mechanic')
-  assert.equal(link, 'https://ridejob.jp/entry/mechanic?job_id=56e8k1g95')
+  assert.equal(link, 'https://ridejob.jp/entry/mechanic?job_id=56e8k1g95&catalog_job_id=56e8k1g95')
   // utm は広告側 url_tags に一本化する（二重キーで form 側の帰属がぶれるのを防ぐ）
   assert.ok(!link.includes('utm_'))
 })
 
-test('keeps every non-mechanic category byte-identical to the legacy /job/{id} link', () => {
+test('keeps every non-mechanic category on /job/{id} and adds the catalog marker', () => {
   for (const category of ['taxi', 'hire', 'dispatch', 'other', '', 'unknown-category']) {
     assert.equal(buildCatalogLink('017t2kbusv', category), LEGACY('017t2kbusv'))
   }
@@ -21,26 +21,26 @@ test('keeps every non-mechanic category byte-identical to the legacy /job/{id} l
 test('does not change real microCMS ids (letters, digits, hyphen, underscore)', () => {
   for (const id of ['cs80efl2jr-h', '088869y_0y_r', '0_--ak8mnzi']) {
     assert.equal(buildCatalogLink(id, 'taxi'), LEGACY(id))
-    assert.equal(buildCatalogLink(id, 'mechanic'), `https://ridejob.jp/entry/mechanic?job_id=${id}`)
+    assert.equal(buildCatalogLink(id, 'mechanic'), `https://ridejob.jp/entry/mechanic?job_id=${id}&catalog_job_id=${id}`)
   }
 })
 
 test('encodes anything unsafe in the id', () => {
-  assert.equal(buildCatalogLink('a&b', 'mechanic'), 'https://ridejob.jp/entry/mechanic?job_id=a%26b')
+  assert.equal(buildCatalogLink('a&b', 'mechanic'), 'https://ridejob.jp/entry/mechanic?job_id=a%26b&catalog_job_id=a%26b')
 })
 
 test('sends Hello Work products to the matching RIDE JOB detail page', () => {
   const id = '27010-41545161'
-  const expected = `https://ridejob.jp/external-job/hellowork/${id}`
+  const expected = `https://ridejob.jp/external-job/hellowork/${id}?catalog_job_id=${id}`
   assert.equal(buildCatalogLink(id, 'mechanic', 'hellowork'), expected)
   assert.ok(!expected.includes('utm_'))
   assert.ok(isCatalogLinkRoutedCorrectly(id, 'mechanic', expected, 'hellowork'))
 })
 
 test('flags rows whose link does not match their category', () => {
-  assert.ok(isCatalogLinkRoutedCorrectly('x1', 'mechanic', 'https://ridejob.jp/entry/mechanic?job_id=x1'))
+  assert.ok(isCatalogLinkRoutedCorrectly('x1', 'mechanic', 'https://ridejob.jp/entry/mechanic?job_id=x1&catalog_job_id=x1'))
   assert.ok(isCatalogLinkRoutedCorrectly('x1', 'taxi', LEGACY('x1')))
   // 整備士が旧リンクのまま／タクシーが整備士フォームに行く、はどちらも不正
   assert.ok(!isCatalogLinkRoutedCorrectly('x1', 'mechanic', LEGACY('x1')))
-  assert.ok(!isCatalogLinkRoutedCorrectly('x1', 'taxi', 'https://ridejob.jp/entry/mechanic?job_id=x1'))
+  assert.ok(!isCatalogLinkRoutedCorrectly('x1', 'taxi', 'https://ridejob.jp/entry/mechanic?job_id=x1&catalog_job_id=x1'))
 })
