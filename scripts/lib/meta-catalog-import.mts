@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 export type MetaCatalogImportResult = {
   id: string
   end_time?: string
@@ -115,6 +117,7 @@ export async function importAndVerifyMetaCatalog(options: ImportOptions): Promis
 
 export type PublishedCatalogStorage = {
   read(pathname: string): Promise<Buffer>
+  readPublic(pathname: string): Promise<Buffer>
   publicUrl(pathname: string): string
 }
 
@@ -136,8 +139,14 @@ export async function importPublishedMetaCatalog(options: {
     || Number(state.products) < 1
     || !/^[a-f0-9]{64}$/.test(String(state.primary_sha256 || ''))
     || !Number.isSafeInteger(state.primary_bytes)
+    || Number(state.primary_bytes) < 1
   ) {
     throw new Error('Meta即時取込に使う公開完了マーカーが不正です')
+  }
+  const primary = await options.storage.readPublic('catalog/ridejob-feed.tsv')
+  const primarySha256 = createHash('sha256').update(primary).digest('hex')
+  if (primary.byteLength !== state.primary_bytes || primarySha256 !== state.primary_sha256) {
+    throw new Error('Meta即時取込を中止しました: 公開完了マーカーと一次フィードが一致しません')
   }
   return importAndVerifyMetaCatalog({
     accessToken: options.accessToken,
