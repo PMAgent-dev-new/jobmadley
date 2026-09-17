@@ -29,6 +29,13 @@ export interface ApplicationFields {
   utmSource?: string
   utmMedium?: string
   utmCampaign?: string
+  utmContent?: string
+  submissionId?: string
+  catalogJobId?: string
+  catalogJobName?: string
+  catalogClickedAtMillis?: number
+  catalogAttributionStatus?: string
+  catalogAppliedJobId?: string
   appliedAtMillis?: number
   /** 全サービス共通で対応履歴メモに載せる補助テキスト（チャネル / 最終接触日時 等）。 */
   extraNotes?: string[]
@@ -194,6 +201,16 @@ const buildRidejobFields = (input: ApplicationFields): Record<string, unknown> =
     : (["companyName"] as Array<keyof ApplicationFields>)
   // 専用の求人URL列が無いため、求人名セルに求人URLを併記する（求人名↵URL）。
   const jobNameWithUrl = [input.jobName, input.jobUrl].filter((v) => v && v.trim()).join("\n") || undefined
+  // 求職者DB🚕は列追加権限を持つ連携アプリが未設定のため、既存の対応履歴メモを互換格納先にする。
+  // 固定マーカーは同じsubmission_idの再送検索にも使う。
+  const catalogNotes = [
+    input.submissionId ? `[submission_id:${input.submissionId}]` : "",
+    input.catalogAppliedJobId ? `応募求人ID: ${input.catalogAppliedJobId}` : "",
+    input.catalogJobId ? `広告クリック求人ID: ${input.catalogJobId}` : "",
+    input.catalogJobName ? `広告クリック求人名: ${input.catalogJobName}` : "",
+    input.catalogClickedAtMillis ? `カタログクリック日時: ${new Date(input.catalogClickedAtMillis).toISOString()}` : "",
+    input.catalogAttributionStatus ? `カタログ求人一致判定: ${input.catalogAttributionStatus}` : "",
+  ].filter(Boolean)
   return dropEmpty({
     求職者名: joinName(input.lastName, input.firstName),
     フリガナ: joinName(input.lastNameKana, input.firstNameKana),
@@ -210,10 +227,11 @@ const buildRidejobFields = (input: ApplicationFields): Record<string, unknown> =
     utm_source: input.utmSource,
     utm_medium: input.utmMedium,
     utm_campaign: input.utmCampaign,
+    utm_content: input.utmContent,
     応募日: input.appliedAtMillis,
     // 求人ID / 応募経由(生) / 流入チャネル / 初回接触 / fbclid / gclid は載せない（列化 or 不要）。
     // チャネル / 最終接触日時 は extraNotes 経由で残す（includeAttribution=false）。
-    対応履歴メモ: buildNotes(input, noteKeys),
+    対応履歴メモ: [buildNotes(input, noteKeys), ...catalogNotes].filter(Boolean).join("\n"),
   })
 }
 
@@ -234,6 +252,13 @@ const buildMechanicFields = (input: ApplicationFields): Record<string, unknown> 
     utm_source: input.utmSource,
     utm_medium: input.utmMedium,
     utm_campaign: input.utmCampaign,
+    utm_content: input.utmContent,
+    submission_id: input.submissionId,
+    応募求人ID: input.catalogAppliedJobId,
+    広告クリック求人ID: input.catalogJobId,
+    広告クリック求人名: input.catalogJobName,
+    カタログクリック日時: input.catalogClickedAtMillis,
+    カタログ求人一致判定: input.catalogAttributionStatus,
     応募日: input.appliedAtMillis,
     // 求人IDの専用列はない。外部求人のraw IDと受付区分、求人ボックス経由の応募者詳細は
     // extraNotes で対応履歴メモに残す。

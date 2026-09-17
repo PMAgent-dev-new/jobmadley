@@ -7,6 +7,7 @@ import type { Job, JobDetail } from "./types"
 
 export type GetJobOptions = {
   draftKey?: string
+  timeoutMs?: number
 }
 
 /** 単一の求人を ID で取得（depth=2 で参照情報も展開） */
@@ -18,6 +19,7 @@ export const getJob = async (jobId: string, options: GetJobOptions = {}): Promis
     contentId: jobId,
     queries,
     context: "getJob",
+    timeoutMs: options.timeoutMs,
   })
 }
 

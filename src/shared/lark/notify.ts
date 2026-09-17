@@ -1,6 +1,6 @@
 // 通知送信の共通ラッパ。chat_id が設定されていれば Lark Open API (im/v1/messages) を優先し、
-// 失敗または chat_id 未設定のときは従来の受信 Webhook にフォールバックする。
-// これにより chat_id / スコープ未整備でも通知が途切れず、段階的に API へ移行できる。
+// 既存経路では従来Webhookへフォールバックできる。応募通知はuuidの冪等性を守るため、
+// chat_id APIの結果が不明・失敗ならWebhookへ二重送信せず、同じuuidでの再送に任せる。
 
 import type { LarkServiceId } from "@/shared/config/env"
 import { sendToLark } from "@/shared/lark/client"
@@ -20,6 +20,9 @@ interface NotifyParams {
   /** Webhook 形式のカードペイロード。API 送信時は内側の card を content 化する。 */
   payload: WebhookCardPayload
   context: string
+  idempotencyKey?: string
+  /** 応募通知はUUID冪等性を守るためfalse。既存経路のみtrue。 */
+  allowWebhookFallback?: boolean
 }
 
 export interface NotifyResult {
@@ -27,7 +30,7 @@ export interface NotifyResult {
   via: "api" | "webhook" | "none"
 }
 
-export const notifyLark = async ({ api, webhookUrl, payload, context }: NotifyParams): Promise<NotifyResult> => {
+export const notifyLark = async ({ api, webhookUrl, payload, context, idempotencyKey, allowWebhookFallback = true }: NotifyParams): Promise<NotifyResult> => {
   // 1) chat_id があれば API を優先
   if (api.chatId) {
     try {
@@ -36,16 +39,22 @@ export const notifyLark = async ({ api, webhookUrl, payload, context }: NotifyPa
         chatId: api.chatId,
         card: payload.card,
         context: `${context}:api`,
+        idempotencyKey,
       })
       if (r.ok) return { ok: true, via: "api" }
+      // 通信例外はLark側だけ成功している可能性がある。同じuuidでの再送に任せ、
+      // ここでWebhookへ二重送信しない。
+      if (idempotencyKey && r.status === 0) return { ok: false, via: "api" }
+      if (!allowWebhookFallback) return { ok: false, via: "api" }
       console.warn(`[notify:${context}] API送信失敗、Webhookにフォールバック: code=${r.code} msg=${r.message}`)
     } catch (error) {
+      if (!allowWebhookFallback) return { ok: false, via: "api" }
       console.warn(`[notify:${context}] API送信で例外、Webhookにフォールバック`, error)
     }
   }
 
   // 2) Webhook フォールバック
-  if (webhookUrl) {
+  if (allowWebhookFallback && webhookUrl) {
     const r = await sendToLark(webhookUrl, payload, `${context}:webhook`)
     return { ok: r.ok, via: "webhook" }
   }

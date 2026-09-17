@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'vitest'
 
-import { touchFromReferrer } from './attribution'
+import { catalogTouchFromSearch, touchFromReferrer } from './attribution'
 
 /**
  * この判定は form_applicant（ridejob.jp/entry）と `rj_attr` Cookie を共有しており、
@@ -48,4 +48,45 @@ test('通常の検索エンジン・自ドメイン判定は従来どおり', ()
   assert.equal(touchFromReferrer('https://ridejob.jp/jobs/tokyo', HOST), undefined)
   assert.equal(touchFromReferrer('', HOST), undefined)
   assert.equal(touchFromReferrer('not a url', HOST), undefined)
+})
+
+test('Metaカタログ専用IDを同じ着地のUTMと結び付ける', () => {
+  assert.deepEqual(
+    catalogTouchFromSearch(
+      '?catalog_job_id=job-1&utm_source=ig&utm_medium=ad&utm_content=Catalog_Mechanic',
+      '/entry/mechanic',
+      '2026-09-17T00:00:00.000Z',
+    ),
+    {
+      jobId: 'job-1',
+      at: '2026-09-17T00:00:00.000Z',
+      landing: '/entry/mechanic',
+      source: 'ig',
+      medium: 'ad',
+      evidence: 'utm',
+    },
+  )
+})
+
+test('fbclidがあればUTM欠落時もMetaカタログ接触として保持する', () => {
+  assert.equal(
+    catalogTouchFromSearch(
+      '?catalog_job_id=27010-41545161&fbclid=abc',
+      '/external-job/hellowork/27010-41545161',
+      '2026-09-17T00:00:00.000Z',
+    )?.evidence,
+    'fbclid',
+  )
+})
+
+test('catalog_job_id単独とMeta以外のUTMはカタログ接触にしない', () => {
+  assert.equal(catalogTouchFromSearch('?catalog_job_id=job-1', '/job/job-1', '2026-09-17T00:00:00.000Z'), undefined)
+  assert.equal(
+    catalogTouchFromSearch(
+      '?catalog_job_id=job-1&utm_source=google&utm_medium=cpc',
+      '/job/job-1',
+      '2026-09-17T00:00:00.000Z',
+    ),
+    undefined,
+  )
 })

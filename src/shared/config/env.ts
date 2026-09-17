@@ -47,6 +47,9 @@ export const larkEnv = {
   chatIdCpOne: () => read("LARK_CHAT_ID_CPONE"),
   chatIdMechanic: () => read("LARK_CHAT_ID_MECHANIC"),
   chatIdCpOneKyujinbox: () => read("LARK_CHAT_ID_CPONE_KYUJINBOX"),
+  // 内部応募フォーム専用。RIDE JOBアプリの送信権限とuuid冪等性を使う。
+  submitChatIdRidejob: () => read("LARK_SUBMIT_CHAT_ID_RIDEJOB"),
+  submitChatIdMechanic: () => read("LARK_SUBMIT_CHAT_ID_MECHANIC"),
 }
 
 // Lark Open API 用の認証情報（サービス別）

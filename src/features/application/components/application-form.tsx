@@ -53,6 +53,7 @@ export default function ApplicationForm({ job, catalogItemId, mode = "apply", jo
   const [agreement, setAgreement] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const hasPushedStandbyCv = useRef(false)
+  const submissionIdRef = useRef<string | null>(null)
 
   useApplySourceCapture()
 
@@ -85,10 +86,17 @@ export default function ApplicationForm({ job, catalogItemId, mode = "apply", jo
         utmSourceFirst,
         utmMediumFirst,
         utmCampaign,
+        utmContent,
         utmLastTouchAt,
         utmFirstTouchAt,
         fbclid,
         gclid,
+        catalogJobId,
+        catalogClickedAt,
+        catalogLandingPath,
+        catalogSource,
+        catalogMedium,
+        catalogEvidence,
       } = resolveApplyContext(jobDetailPath)
 
       const applicationData: ApplicationFormData = {
@@ -109,20 +117,29 @@ export default function ApplicationForm({ job, catalogItemId, mode = "apply", jo
         utmSourceFirst,
         utmMediumFirst,
         utmCampaign,
+        utmContent,
         utmLastTouchAt,
         utmFirstTouchAt,
         fbclid,
         gclid,
+        catalogJobId,
+        catalogClickedAt,
+        catalogLandingPath,
+        catalogSource,
+        catalogMedium,
+        catalogEvidence: catalogEvidence || undefined,
         applicationIntent: isConsult ? "consult" : "apply",
       }
 
-      const metaEventId = genEventId()
+      const metaEventId = submissionIdRef.current || genEventId()
+      submissionIdRef.current = metaEventId
       await postApplication({
         ...applicationData,
         jobId: job?.id ?? "",
         applyEmail: job?.applyEmail ?? "",
         applicationSource,
         metaEventId,
+        submissionId: metaEventId,
       })
 
       // 送信成功時に Meta Lead を発火（サーバーCAPIと同一 eventId で重複排除）

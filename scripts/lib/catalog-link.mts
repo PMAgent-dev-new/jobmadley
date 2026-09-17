@@ -17,10 +17,10 @@
  * （AD_MEDIUMS に無い）、Lark の「応募経由」が空欄になって日次レポートから消える。
  * → 整備士は `job_id` だけを渡し、utm は url_tags に一本化する。
  *
- * 求人IDは `job_id` で渡す。form_applicant はクエリ付きの着地URL（送信時の Referer）を
- * Lark Base の `LP_URL` に保存しているので、フォームを改修しなくても求人単位で突合できる。
+ * 求人IDは `job_id` で渡す。加えて全商品URLへ `catalog_job_id` を付け、
+ * 応募フォームまでサイト内回遊しても「広告で見た求人」を専用Cookieで保持する。
  *
- * タクシー等の他職種は従来どおり `/job/{id}`（jobmadley 側の応募導線）で、URL も1文字も変えない。
+ * タクシー等の他職種は従来どおり `/job/{id}`（jobmadley 側の応募導線）へ送る。
  */
 export type CatalogOrigin = 'ridejob' | 'hellowork'
 
@@ -33,12 +33,12 @@ export function buildCatalogLink(
   if (origin === 'hellowork') {
     // 求人IDはパス自体で照合できる。utm は広告側 url_tags に一本化し、同名キーの
     // 二重付与で応募帰属が catalog 扱いになることを防ぐ。
-    return `https://ridejob.jp/external-job/hellowork/${id}`
+    return `https://ridejob.jp/external-job/hellowork/${id}?catalog_job_id=${id}`
   }
   if (category === 'mechanic') {
-    return `https://ridejob.jp/entry/mechanic?job_id=${id}`
+    return `https://ridejob.jp/entry/mechanic?job_id=${id}&catalog_job_id=${id}`
   }
-  return `https://ridejob.jp/job/${id}?utm_content=${id}&utm_source=meta&utm_medium=catalog`
+  return `https://ridejob.jp/job/${id}?utm_content=${id}&utm_source=meta&utm_medium=catalog&catalog_job_id=${id}`
 }
 
 /** 行の遷移先が職種に対して正しいか（フィード全行の公開前検査に使う）。 */

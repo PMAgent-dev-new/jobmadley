@@ -9,7 +9,12 @@ import {
   resolveSubmitNotificationTarget,
 } from "@/shared/lark/routing"
 import { notifyLark } from "@/shared/lark/notify"
-import { createBitableRecord, type BitableCreateResult } from "@/shared/lark/bitable"
+import {
+  createBitableRecord,
+  updateBitableRecord,
+  upsertBitableRecordByTextField,
+  type BitableCreateResult,
+} from "@/shared/lark/bitable"
 import {
   buildFieldsForService,
   resolveApplicationSourceRecordId,
@@ -27,6 +32,12 @@ import { getExternalJobForSubmission } from "@/features/external-jobs/api"
 import { parseExternalApplyId } from "@/features/external-jobs/apply-id"
 import { isExternalJobExpired } from "@/features/external-jobs/expiry"
 import { isExternalMetaCatalogJob } from "@/features/external-jobs/catalog-eligibility"
+import { getJob } from "@/features/jobs/api"
+import {
+  assessCatalogTouch,
+  compareCatalogAndAppliedJob,
+  type CatalogAttributionStatus,
+} from "@/features/application/lib/catalog-attribution"
 
 interface ApplicationPayload {
   lastName?: string
@@ -47,14 +58,80 @@ interface ApplicationPayload {
   utmSourceFirst?: string
   utmMediumFirst?: string
   utmCampaign?: string
+  utmContent?: string
   utmLastTouchAt?: string
   utmFirstTouchAt?: string
   fbclid?: string
   gclid?: string
+  catalogJobId?: string
+  catalogClickedAt?: string
+  catalogLandingPath?: string
+  catalogSource?: string
+  catalogMedium?: string
+  catalogEvidence?: "utm" | "fbclid"
+  catalogJobName?: string
+  catalogAttributionStatus?: CatalogAttributionStatus
+  catalogClickedAtMillis?: number
+  submissionId?: string
   applyEmail?: string
   metaEventId?: string
   applicationIntent?: "apply" | "consult"
   [key: string]: unknown
+}
+
+const CATALOG_STATUS_LABELS: Record<CatalogAttributionStatus, string> = {
+  same_job: "広告で見た求人と同じ",
+  changed_job: "広告クリック後に別求人へ応募",
+  missing: "カタログ求人IDを取得できず",
+  applied_job_missing: "応募求人IDを取得できず",
+  stale: "クリックから7日以上",
+  invalid: "無効なカタログ求人情報",
+}
+
+export const appendLarkNotificationMarker = (memo: string, submissionId: string): string => {
+  const marker = `[lark_notified:${submissionId}]`
+  if (memo.includes(marker)) return memo
+  return [memo.trim(), marker].filter(Boolean).join("\n")
+}
+
+const resolveCatalogAttribution = async (
+  input: ApplicationPayload,
+): Promise<void> => {
+  const assessment = assessCatalogTouch({ ...input, appliedJobId: input.jobId })
+  if (assessment.status) {
+    input.catalogAttributionStatus = assessment.status
+    input.catalogJobId = assessment.jobId
+    input.catalogClickedAtMillis = assessment.clickedAtMillis
+    return
+  }
+  if (!assessment.jobId || !assessment.clickedAtMillis) return
+
+  input.catalogJobId = assessment.jobId
+  input.catalogClickedAtMillis = assessment.clickedAtMillis
+  const external = parseExternalApplyId(assessment.jobId)
+  if (external) {
+    const verified = await getExternalJobForSubmission(external.source, external.sourceId)
+    if (!verified.ok) throw new Error("catalog source unavailable")
+    if (!verified.job || !isExternalMetaCatalogJob(verified.job)) {
+      input.catalogAttributionStatus = "invalid"
+      return
+    }
+    input.catalogJobId = external.sourceId
+    input.catalogJobName = verified.job.title
+  } else {
+    try {
+      const job = await getJob(assessment.jobId, { timeoutMs: 5000 })
+      if (!job || !isMetaCatalogJob(job)) {
+        input.catalogAttributionStatus = "invalid"
+        return
+      }
+      input.catalogJobName = job.jobName || job.title
+    } catch (error) {
+      console.warn("[WARNING] catalog job verification unavailable", error)
+      throw new Error("catalog source unavailable")
+    }
+  }
+  input.catalogAttributionStatus = compareCatalogAndAppliedJob(input.catalogJobId, input.jobId)
 }
 
 interface ClassifiedApplication {
@@ -111,6 +188,20 @@ const buildInternalLarkCard = (
       `求人ID: ${input.jobId ?? "—"}`,
       `求人URL: ${input.jobUrl ?? `https://ridejob.jp/job/${input.jobId ?? "—"}`}`,
     )
+  }
+
+  const catalogLines: string[] = []
+  if (input.catalogAttributionStatus) {
+    catalogLines.push(
+      `判定: ${CATALOG_STATUS_LABELS[input.catalogAttributionStatus]}`,
+      `広告で見た求人: ${input.catalogJobName ?? "—"}`,
+      `広告クリック求人ID: ${input.catalogJobId ?? "—"}`,
+      `実際に${actionLabel}した求人: ${input.jobName ?? "—"}`,
+      `実際に${actionLabel}した求人ID: ${input.jobId ?? "—"}`,
+    )
+    if (input.catalogClickedAtMillis) {
+      catalogLines.push(`広告クリック日時: ${new Date(input.catalogClickedAtMillis).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}`)
+    }
   }
 
   const utmLines: string[] = []
@@ -190,6 +281,12 @@ const buildInternalLarkCard = (
               { tag: "div", text: { tag: "lark_md", content: `**📊 流入経路**\n${utmLines.join("\n")}` } },
             ]
           : []),
+        ...(catalogLines.length > 0
+          ? [
+              { tag: "hr" },
+              { tag: "div", text: { tag: "lark_md", content: `**🛒 Metaカタログ求人**\n${catalogLines.join("\n")}` } },
+            ]
+          : []),
       ],
     },
   }
@@ -228,6 +325,13 @@ const buildBitableFields = (input: ApplicationPayload, c: ClassifiedApplication)
     utmSource: input.utmSource,
     utmMedium: input.utmMedium,
     utmCampaign: input.utmCampaign,
+    utmContent: input.utmContent,
+    submissionId: input.submissionId,
+    catalogJobId: input.catalogJobId,
+    catalogJobName: input.catalogJobName,
+    catalogClickedAtMillis: input.catalogClickedAtMillis,
+    catalogAttributionStatus: input.catalogAttributionStatus,
+    catalogAppliedJobId: input.jobId,
     appliedAtMillis: Date.now(),
     extraNotes,
     attributionNotes,
@@ -279,7 +383,13 @@ const logRequestContext = (request: Request, timestamp: string): void => {
 /** Cookie ヘッダから指定名の値を取り出す（_fbp / _fbc 用）。 */
 const readCookie = (cookieHeader: string, name: string): string | undefined => {
   const target = cookieHeader.split("; ").find((c) => c.startsWith(`${name}=`))
-  return target ? decodeURIComponent(target.slice(name.length + 1)) : undefined
+  if (!target) return undefined
+  const raw = target.slice(name.length + 1)
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
 }
 
 export async function POST(request: Request) {
@@ -288,6 +398,10 @@ export async function POST(request: Request) {
 
     const incoming = (await request.json()) as ApplicationPayload
     resolveApplicationSource(incoming, new URL(request.url))
+    incoming.submissionId = String(incoming.submissionId || incoming.metaEventId || "").trim().slice(0, 128)
+    if (!incoming.submissionId) {
+      return NextResponse.json({ success: false, message: "submissionId is required" }, { status: 400 })
+    }
 
     // 転載求人は掲載企業を伏せているため、応募フォームは社名を持たない（ブラウザに出さないため）。
     // 社内通知とLark Baseには実名が要るので、ここで jobId から引き直す。
@@ -361,6 +475,16 @@ export async function POST(request: Request) {
       incoming.jobUrl = canonicalJobUrl.toString()
     }
 
+    try {
+      await resolveCatalogAttribution(incoming)
+    } catch (error) {
+      console.error("[ERROR] Catalog source verification failed", error)
+      return NextResponse.json(
+        { success: false, message: "Catalog job source is temporarily unavailable" },
+        { status: 503 },
+      )
+    }
+
     console.log("[INFO] Application request accepted", {
       jobId: incoming.jobId || "(none)",
       intent: incoming.applicationIntent || "apply",
@@ -399,11 +523,15 @@ export async function POST(request: Request) {
       console.error(`[ERROR] Lark notification target is not configured (${notification.type})`)
       return NextResponse.json({ success: false, message: "Notification target not configured" }, { status: 500 })
     }
+    if (!classification.isCpOne && !notification.chatId) {
+      console.error(`[ERROR] Idempotent Lark chat target is not configured (${notification.type})`)
+      return NextResponse.json({ success: false, message: "Notification chat target not configured" }, { status: 500 })
+    }
     console.log(
       `[INFO] Notification target: type=${notification.type} service=${notification.service} chat=${notification.chatId ? "set" : "-"} webhook=${notification.url ? "set" : "-"}`,
     )
 
-    // Base登録は bitable API へ（非致命）。テスト応募は登録しない。
+    // Base登録は bitable API へ。実応募では通知前に必ず成功させ、テスト応募だけ登録しない。
     const baseTarget = resolveBaseTarget(classification)
     if (test.isTest) {
       console.log(`[INFO] Test application; skipping base registration (service=${baseTarget.service})`)
@@ -411,67 +539,235 @@ export async function POST(request: Request) {
       console.log(`[INFO] Base registration target: service=${baseTarget.service} table=${baseTarget.tableId}`)
     }
 
-    // 並列送信
+    // Baseを応募受付の冪等ジャーナルとして先に確定する。
+    // submission_id が同じ再送は同じレコードへ更新され、通知済みなら以降を重複実行しない。
+    let baseRecordId = ""
+    let notificationAlreadySent = false
+    let notificationInProgress = false
+    let notificationRecoveryOnly = false
+    let notificationRecoveryExpired = false
+    let baseFields: Record<string, unknown> = {}
+    let latestRidejobMemo = ""
+    if (!test.isTest && baseTarget.service !== "liftjob") {
+      const appFields = buildBitableFields(incoming, classification)
+      if (baseTarget.service === "ridejob" && appFields.companyName) {
+        try {
+          appFields.companyRecordId = await resolveRidejobCompanyRecordId(appFields.companyName)
+          console.log(
+            appFields.companyRecordId
+              ? `[INFO] 得意先CRM linked: ${appFields.companyName} -> ${appFields.companyRecordId}`
+              : `[INFO] 得意先CRM not found for company: ${appFields.companyName}`,
+          )
+        } catch (error) {
+          console.warn("[WARNING] 得意先CRM lookup failed", error)
+        }
+      }
+      if (baseTarget.service === "ridejob" || baseTarget.service === "mechanic") {
+        try {
+          appFields.applicationSourceRecordId = await resolveApplicationSourceRecordId(
+            baseTarget.service,
+            appFields.applicationSource,
+          )
+        } catch (error) {
+          console.warn("[WARNING] 応募経由マスタ lookup failed", error)
+        }
+      }
+      try {
+        baseFields = buildFieldsForService(baseTarget.service, appFields)
+        const ridejobSubmissionMarker = `[submission_id:${incoming.submissionId}]`
+        let saved = await upsertBitableRecordByTextField({
+          service: baseTarget.service,
+          tableId: baseTarget.tableId,
+          fieldName: baseTarget.service === "ridejob" ? "対応履歴メモ" : "submission_id",
+          value: baseTarget.service === "ridejob" ? ridejobSubmissionMarker : incoming.submissionId,
+          operator: baseTarget.service === "ridejob" ? "contains" : "is",
+          fields: baseFields,
+          updateExisting: false,
+        })
+        const initiallyCreated = saved.created
+        baseRecordId = saved.recordId
+        const hasNotificationMarker = (fields: Record<string, unknown>): boolean => (
+          baseTarget.service === "ridejob"
+            ? String(fields["対応履歴メモ"] ?? "").includes(`[lark_notified:${incoming.submissionId}]`)
+            : fields["Lark通知送信済み"] === true
+        )
+        notificationAlreadySent = hasNotificationMarker(saved.previousFields)
+
+        // 同じsubmission_idが同時到着した場合、作成の敗者は先着の通知完了を待つ。
+        // 先着が落ちたケースだけは30秒後の再送が引き継げるようにし、永久停止も避ける。
+        if (!saved.created && !notificationAlreadySent) {
+          for (let attempt = 0; attempt < 12 && !notificationAlreadySent; attempt += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 250))
+            saved = await upsertBitableRecordByTextField({
+              service: baseTarget.service,
+              tableId: baseTarget.tableId,
+              fieldName: baseTarget.service === "ridejob" ? "対応履歴メモ" : "submission_id",
+              value: baseTarget.service === "ridejob" ? ridejobSubmissionMarker : incoming.submissionId,
+              operator: baseTarget.service === "ridejob" ? "contains" : "is",
+              fields: baseFields,
+              updateExisting: false,
+            })
+            notificationAlreadySent = hasNotificationMarker(saved.previousFields)
+          }
+          const submittedAt = Number(saved.previousFields["応募日"])
+          const notificationAge = Number.isFinite(submittedAt) ? Date.now() - submittedAt : undefined
+          notificationInProgress = !notificationAlreadySent
+            && (notificationAge === undefined || notificationAge < 30_000)
+          // Larkのuuid重複排除は1時間のため、55分を超えた未確定通知は自動再送しない。
+          // それ以前なら同じuuidで安全に復旧できる。
+          notificationRecoveryExpired = !notificationAlreadySent
+            && notificationAge !== undefined
+            && notificationAge >= 55 * 60_000
+          notificationRecoveryOnly = !initiallyCreated
+            && !notificationAlreadySent
+            && !notificationInProgress
+            && !notificationRecoveryExpired
+        }
+        if (baseTarget.service === "ridejob") {
+          latestRidejobMemo = String(
+            saved.previousFields["対応履歴メモ"] ?? baseFields["対応履歴メモ"] ?? "",
+          ).trim()
+        }
+        console.log("[INFO] Base upsert succeeded", {
+          service: baseTarget.service,
+          recordId: saved.recordId,
+          created: saved.created,
+        })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        console.error("[ERROR] Base upsert failed", error)
+        await notifyBaseRegistrationError({
+          route: "submit-application",
+          service: baseTarget.service,
+          tableId: baseTarget.tableId,
+          status: 0,
+          message,
+          applicant: {
+            name: `${incoming.lastName ?? ""} ${incoming.firstName ?? ""}`.trim() || undefined,
+            phone: incoming.phone,
+            email: incoming.email,
+          },
+          job: { id: incoming.jobId, name: incoming.jobName, url: incoming.jobUrl },
+        }).catch((alertError) => console.error("[alert] notifyBaseRegistrationError failed", alertError))
+        return NextResponse.json({ success: false, message: "Failed to register application" }, { status: 500 })
+      }
+    }
+
+    if (notificationInProgress) {
+      console.warn("[INFO] Duplicate submission is still being processed", {
+        submissionId: incoming.submissionId,
+      })
+      return NextResponse.json(
+        { success: false, message: "Submission is still being processed; retry shortly" },
+        { status: 503 },
+      )
+    }
+    if (notificationRecoveryExpired) {
+      console.error("[ERROR] Lark notification recovery window expired; automatic resend blocked", {
+        submissionId: incoming.submissionId,
+        baseRecordId,
+      })
+      return NextResponse.json(
+        { success: false, message: "Notification recovery requires manual confirmation" },
+        { status: 503 },
+      )
+    }
+
     type TaskResult = {
-      name: "base_registration" | "applicant_mail" | "applicant_sms" | "meta_capi"
+      name: "applicant_mail" | "applicant_sms" | "meta_capi"
       ok: boolean
-      base?: BitableCreateResult
     }
     const tasks: Promise<TaskResult>[] = []
 
-    // 受付の正本となる社内通知を先に確定する。ここで失敗した場合は、メール・SMS・CAPIを
-    // 送らずにエラーを返し、「未受付なのに応募者へ完了通知／Lead計測」になるのを防ぐ。
-    const notificationResult = await notifyLark({
-      api: { service: notification.service, chatId: notification.chatId },
-      webhookUrl: notification.url,
-      payload: buildInternalLarkCard(incoming, classification, test),
-      context: "submit-application:notification",
-    })
-    if (!notificationResult.ok) {
-      return NextResponse.json({ success: false, message: "Failed to send notification to Lark" }, { status: 502 })
+    if (!notificationAlreadySent) {
+      // 受付の正本となる社内通知を確定する。失敗時は同じsubmission_idで安全に再送できる。
+      const notificationResult = await notifyLark({
+        api: { service: notification.service, chatId: notification.chatId },
+        webhookUrl: notification.url,
+        payload: buildInternalLarkCard(incoming, classification, test),
+        context: "submit-application:notification",
+        idempotencyKey: incoming.submissionId,
+        allowWebhookFallback: classification.isCpOne,
+      })
+      if (!notificationResult.ok) {
+        return NextResponse.json({ success: false, message: "Failed to send notification to Lark" }, { status: 502 })
+      }
+      if (baseRecordId) {
+        const notificationFields = baseTarget.service === "ridejob"
+          ? {
+              "対応履歴メモ": appendLarkNotificationMarker(latestRidejobMemo, incoming.submissionId),
+            }
+          : { "Lark通知送信済み": true }
+        let notificationStatePersisted = false
+        let lastPersistError: unknown
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          try {
+            await updateBitableRecord({
+              service: baseTarget.service,
+              tableId: baseTarget.tableId,
+              recordId: baseRecordId,
+              fields: notificationFields,
+            })
+            notificationStatePersisted = true
+            break
+          } catch (error) {
+            lastPersistError = error
+            if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 100))
+          }
+        }
+        if (!notificationStatePersisted) {
+          console.error("[ERROR] Failed to persist Lark notification state after 3 attempts", lastPersistError)
+          return NextResponse.json(
+            { success: false, message: "Failed to persist notification state" },
+            { status: 503 },
+          )
+        }
+      }
+    } else {
+      console.log("[INFO] Duplicate submission already notified; skipping side effects", {
+        submissionId: incoming.submissionId,
+      })
+      return NextResponse.json({ success: true, duplicate: true })
     }
-    if (!test.isTest) {
-      tasks.push(
-        (async (): Promise<TaskResult> => {
-          const appFields = buildBitableFields(incoming, classification)
-          if (baseTarget.service === "ridejob" && appFields.companyName) {
-            try {
-              appFields.companyRecordId = await resolveRidejobCompanyRecordId(appFields.companyName)
-              console.log(
-                appFields.companyRecordId
-                  ? `[INFO] 得意先CRM linked: ${appFields.companyName} -> ${appFields.companyRecordId}`
-                  : `[INFO] 得意先CRM not found for company: ${appFields.companyName}`,
-              )
-            } catch (error) {
-              console.warn("[WARNING] 得意先CRM lookup failed", error)
-            }
-          }
-          if (baseTarget.service === "ridejob" || baseTarget.service === "mechanic") {
-            try {
-              appFields.applicationSourceRecordId = await resolveApplicationSourceRecordId(
-                baseTarget.service,
-                appFields.applicationSource,
-              )
-              console.log(
-                `[INFO] 応募経由マスタ linked (${baseTarget.service}): ${appFields.applicationSource ?? "-"} -> ${appFields.applicationSourceRecordId ?? "(none)"}`,
-              )
-            } catch (error) {
-              console.warn("[WARNING] 応募経由マスタ lookup failed", error)
-            }
-          }
-          const bitableInput = buildFieldsForService(baseTarget.service, appFields)
-          const result = await createBitableRecord({
-            service: baseTarget.service,
-            tableId: baseTarget.tableId,
-            fields: bitableInput,
-          }).catch((error: unknown): BitableCreateResult => ({
-            ok: false,
-            status: 0,
-            message: error instanceof Error ? error.message : "bitable error",
-          }))
-          return { name: "base_registration", ok: result.ok, base: result }
-        })(),
-      )
+
+    // 先着が通知済み印を書き込む前に終了した場合は、55分以内なら同じLark uuidで復旧する。
+    // 元処理は印の確定前に後続へ進まないため、復旧側がメール・SMS・CAPIまで完了させる。
+    if (notificationRecoveryOnly) {
+      console.log("[INFO] Resuming downstream effects after notification recovery", {
+        submissionId: incoming.submissionId,
+      })
+    }
+
+    // CP One(LIFT JOB)は専用Baseにsubmission_id列が無いため、従来どおり
+    // 通知成功後に非致命のcreateを行う。RIDE JOBの新しいupsert経路には載せない。
+    if (!test.isTest && baseTarget.service === "liftjob") {
+      const appFields = buildBitableFields(incoming, classification)
+      const result = await createBitableRecord({
+        service: baseTarget.service,
+        tableId: baseTarget.tableId,
+        fields: buildFieldsForService(baseTarget.service, appFields),
+      }).catch((error: unknown): BitableCreateResult => ({
+        ok: false,
+        status: 0,
+        message: error instanceof Error ? error.message : "bitable error",
+      }))
+      if (!result.ok) {
+        console.warn(`[WARNING] Base registration failed (service=liftjob): status=${result.status} message=${result.message}`)
+        await notifyBaseRegistrationError({
+          route: "submit-application",
+          service: baseTarget.service,
+          tableId: baseTarget.tableId,
+          status: result.status,
+          code: result.code,
+          message: result.message,
+          applicant: {
+            name: `${incoming.lastName ?? ""} ${incoming.firstName ?? ""}`.trim() || undefined,
+            phone: incoming.phone,
+            email: incoming.email,
+          },
+          job: { id: incoming.jobId, name: incoming.jobName, url: incoming.jobUrl },
+        }).catch((error) => console.error("[alert] notifyBaseRegistrationError failed", error))
+      }
     }
 
     // 応募者向け自動返信（非致命。email 不正時／テスト応募時はスキップ）
@@ -533,32 +829,6 @@ export async function POST(request: Request) {
 
     const results = await Promise.all(tasks)
 
-    // Base登録失敗は非致命（Lark通知は上で成功済み）。
-    const baseResult = results.find((r) => r.name === "base_registration")
-    if (baseResult && !baseResult.ok) {
-      const b = baseResult.base
-      console.warn(
-        `[WARNING] Base registration failed (service=${baseTarget.service}): status=${b?.status} message=${b?.message}`,
-      )
-      await notifyBaseRegistrationError({
-        route: "submit-application",
-        service: baseTarget.service,
-        tableId: baseTarget.tableId,
-        status: b?.status ?? 0,
-        code: b?.code,
-        message: b?.message,
-        applicant: {
-          name: `${incoming.lastName ?? ""} ${incoming.firstName ?? ""}`.trim() || undefined,
-          phone: incoming.phone,
-          email: incoming.email,
-        },
-        job: {
-          id: incoming.jobId,
-          name: incoming.jobName,
-          url: incoming.jobUrl,
-        },
-      }).catch((error) => console.error("[alert] notifyBaseRegistrationError failed", error))
-    }
     const mailResult = results.find((r) => r.name === "applicant_mail")
     if (mailResult && !mailResult.ok) {
       console.warn("[WARNING] Applicant auto-reply mail failed, but proceeding with success response")

@@ -48,13 +48,20 @@ function hostOf(input: unknown): string {
 // 各外部経路を「許可リスト内ホストへ向けて」有効化する env。値はダミーで良い（スパイが応答するため）。
 // Gmail(GMAIL_SA_*) は敢えて未設定にして経路をスキップさせる（上記「限界」参照）。
 const ALLOWLISTED_ENV: Record<string, string> = {
-  // Lark 通知は Webhook 経路（LARK_CHAT_ID を設定しないことで im API ではなく Webhook を使う）
+  // RIDE JOB／整備士の応募通知はuuid付きIM API、CP Oneは従来Webhookを使う。
   LARK_WEBHOOK: "https://open.larksuite.com/open-apis/bot/v2/hook/aaaaaaaa",
   LARK_WEBHOOK_MECHANIC: "https://open.larksuite.com/open-apis/bot/v2/hook/bbbbbbbb",
+  LARK_WEBHOOK_CPONE: "https://open.larksuite.com/open-apis/bot/v2/hook/cccccccc",
+  LARK_SUBMIT_CHAT_ID_RIDEJOB: "oc_ridejob",
+  LARK_SUBMIT_CHAT_ID_MECHANIC: "oc_mechanic",
   // Base(bitable) 登録・lookup・認証に必要な Lark アプリ資格情報（ridejob サービスの fallback 経路）
   LARK_APP_ID: "test-app-id",
   LARK_APP_SECRET: "test-app-secret",
   LARK_BASE_APP_TOKEN: "test-app-token",
+  // 整備士系は mechanic サービスの資格情報を使うため、別名でも同じ許可ホストを有効化する。
+  APP_ID_MECHANIC: "test-mechanic-app-id",
+  APP_SECRET_MECHANIC: "test-mechanic-app-secret",
+  APP_TOKEN_MECHANIC: "test-mechanic-app-token",
   // 応募者SMS（CPaaS）と送信ログ（eeasy）
   CPAASNOW_API_TOKEN: "test-cpaas-token",
   SMS_LOG_SECRET: "test-sms-log-secret",
@@ -111,6 +118,9 @@ describe("submit-application POST — outbound host allowlist", () => {
     // status 202 は CPaaS が必須とする値（他モジュールは res.ok=2xx 判定なので 202 でも OK）。
     fetchSpy = vi.fn(
       async (input: unknown) => {
+        if (String(input).includes("/records/search")) {
+          return Response.json({ code: 0, msg: "ok", data: { items: [] } })
+        }
         if (hostOf(input) === "urvkgyohtqfxmymaivth.supabase.co") {
           return new Response(JSON.stringify([{
             source: "hellowork",
@@ -236,6 +246,9 @@ describe("submit-application POST — outbound host allowlist", () => {
 
   it("keeps external mechanic consultation routing even when the listed employer matches CP One", async () => {
     fetchSpy.mockImplementation(async (input: unknown) => {
+      if (String(input).includes("/records/search")) {
+        return Response.json({ code: 0, msg: "ok", data: { items: [] } })
+      }
       if (hostOf(input) === "urvkgyohtqfxmymaivth.supabase.co") {
         return new Response(JSON.stringify([{
           source: "hellowork",
@@ -276,8 +289,8 @@ describe("submit-application POST — outbound host allowlist", () => {
     }))
     expect(res.status).toBe(200)
     const urls = fetchSpy.mock.calls.map((call) => String(call[0]))
-    expect(urls.some((url) => url.includes("/hook/bbbbbbbb"))).toBe(true)
-    expect(urls.some((url) => url.includes("/hook/aaaaaaaa"))).toBe(false)
+    expect(urls.some((url) => url.includes("/im/v1/messages"))).toBe(true)
+    expect(urls.some((url) => url.includes("/hook/cccccccc"))).toBe(false)
     const bodies = fetchSpy.mock.calls
       .map((call) => String((call[1] as RequestInit | undefined)?.body ?? ""))
       .join("\n")
@@ -285,8 +298,25 @@ describe("submit-application POST — outbound host allowlist", () => {
     expect(bodies).not.toContain("CPONE")
   })
 
+  it("keeps CP One on its legacy webhook/create path without new idempotency columns", async () => {
+    const { POST } = await import("./route")
+    const res = await POST(makeRequest({
+      ...applicantBody,
+      companyName: "CP One Japan 合同会社",
+      jobName: "LIFT JOB求人",
+    }))
+
+    expect(res.status).toBe(200)
+    const urls = fetchSpy.mock.calls.map((call) => String(call[0]))
+    expect(urls.some((url) => url.includes("/hook/cccccccc"))).toBe(true)
+    expect(urls.some((url) => url.includes("/records/search"))).toBe(false)
+  })
+
   it("keeps existing non-mechanic external jobs submittable as applications", async () => {
     fetchSpy.mockImplementation(async (input: unknown) => {
+      if (String(input).includes("/records/search")) {
+        return Response.json({ code: 0, msg: "ok", data: { items: [] } })
+      }
       if (hostOf(input) === "urvkgyohtqfxmymaivth.supabase.co") {
         return new Response(JSON.stringify([{
           source: "hellowork",
@@ -407,5 +437,11 @@ describe("submit-application POST — outbound host allowlist", () => {
   it("the allowlist check itself has teeth", () => {
     // fetch('https://evil.example/...') を足す退行は必ず捕まること。
     expect(ALLOWED_HOSTS.has(hostOf("https://evil.example/steal"))).toBe(false)
+  })
+
+  it("preserves operator notes while appending the Lark notification marker", async () => {
+    const { appendLarkNotificationMarker } = await import("./route")
+    expect(appendLarkNotificationMarker("[submission_id:submission-1]\n電話済み", "submission-1"))
+      .toBe("[submission_id:submission-1]\n電話済み\n[lark_notified:submission-1]")
   })
 })
